@@ -1,0 +1,27 @@
+[package]
+name = "multi_vector"
+version = "0.0.0"
+authors = ["iagox86 <ron-git@skullsecurity.org>"]
+edition = "2018"
+description = "Multiple inter-connected vectors"
+license = "MIT"
+documentation = "https://github.com/h2gb/multi_vector"
+homepage = "https://github.com/h2gb/multi_vector"
+repository = "https://github.com/h2gb/multi_vector"
+readme = "README.md"
+
+# [features]
+# serialize = ["serde", "ron"]
+
+[dependencies]
+# Serialize / deserialize are disabled by default
+serde = { version = "~1.0.110", optional = false }
+ron   = { version = "~0.5.1",   optional = false }
+bumpy_vector = { path = "/home/ron/projects/bumpy_vector", features = ["serde"] }
+
+[dev-dependencies]
+pretty_assertions = "~0.6.1"
+
+# This lets us use special features in our documentation
+[package.metadata."docs.rs"]
+all-features = true
