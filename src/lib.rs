@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use bumpy_vector::{BumpyVector, BumpyEntry};
+use std::fmt::Debug;
 
 #[cfg(feature = "serialize")]
 use serde::{Serialize, Deserialize};
@@ -26,42 +27,56 @@ that.
 // Basically a BumpyEntry + a string for the name
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-pub struct MultiEntry<T> {
+struct MultiEntry<T> {
     vector: String,
-    entry: BumpyEntry<T>,
+    data: T,
+    friends: Vec<(String, usize)>,
 }
 
-impl<T> From<(String, BumpyEntry<T>)> for MultiEntry<T> {
-    fn from(o: (String, BumpyEntry<T>)) -> Self {
-        MultiEntry {
-          vector: o.0,
-          entry: o.1,
+impl<T> MultiEntry<T> {
+    fn wrap_entry(vector: String, entry: BumpyEntry<T>, friends: Vec<(String, usize)>) -> BumpyEntry<MultiEntry<T>> {
+        BumpyEntry {
+            entry: MultiEntry {
+                vector: vector,
+                friends: friends,
+                data: entry.entry,
+            },
+            index: entry.index,
+            size: entry.size,
         }
+    }
+
+    fn unwrap_entry(entry: BumpyEntry<MultiEntry<T>>) -> (String, BumpyEntry<T>, Vec<(String, usize)>) {
+        let vector = entry.entry.vector;
+        let data = entry.entry.data;
+        let friends = entry.entry.friends;
+
+        (vector, BumpyEntry { entry: data, index: entry.index, size: entry.size }, friends)
     }
 }
 
-impl<T> From<(String, T, usize, usize)> for MultiEntry<T> {
-    fn from(o: (String, T, usize, usize)) -> Self {
-        MultiEntry {
-          vector: o.0,
-          entry: BumpyEntry::from((o.1, o.2, o.3)),
-        }
-    }
-}
+// impl<T> From<(String, Vec<(String, usize)>, BumpyEntry<T>)> for MultiEntry<T> {
+//     fn from(o: (String, BumpyEntry<T>)) -> Self {
+//         MultiEntry {
+//           vector: o.0,
+//           entry: o.1,
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct MultiVector<T>
 where
-    T: Clone
+    T: Clone + Debug
 {
     // A map of bumpy_vectors, indexed by name
-    vectors: HashMap<String, BumpyVector<T>>,
+    vectors: HashMap<String, BumpyVector<MultiEntry<T>>>,
 }
 
 impl<'a, T> MultiVector<T>
 where
-    T: Clone
+    T: Clone + Debug
 {
 
     pub fn new() -> Self {
@@ -70,17 +85,17 @@ where
         }
     }
 
-    pub fn insert_vector(&mut self, name: &str, vector: BumpyVector<T>) -> Result<(), &'static str> {
+    pub fn create_vector(&mut self, name: &str, max_size: usize) -> Result<(), &'static str> {
         if self.vectors.contains_key(name) {
             return Err("Vector with that name already exists");
         }
 
-        self.vectors.insert(String::from(name), vector);
+        self.vectors.insert(String::from(name), BumpyVector::new(max_size));
 
         Ok(())
     }
 
-    pub fn remove_vector(&mut self, vector: &str) -> Result<BumpyVector<T>, &'static str> {
+    pub fn destroy_vector(&mut self, vector: &str) -> Result<usize, &'static str> {
         let v = match self.vectors.get(vector) {
             Some(v) => v,
             None => return Err("Vector with that name does not exist"),
@@ -90,61 +105,91 @@ where
             return Err("Vector is not empty");
         }
 
-        self.vectors.remove(vector).ok_or("Vector with that name disappeared")
+        match self.vectors.remove(vector) {
+            Some(v) => Ok(v.max_size()),
+            None    => Err("Vector with that name disappeared"),
+        }
     }
 
-    pub fn insert_entries(&mut self, entries: Vec<MultiEntry<T>>) -> Result<(), String> {
+    pub fn insert_entries(&mut self, entries: Vec<(String, BumpyEntry<T>)>) -> Result<(), String> {
         // Clone the full set so we can backtrack if things go wrong
         // XXX: This is JUST for testing! This is incredibly slow!
         let backtrack = self.vectors.clone();
 
-        for entry in entries {
-            // Try and get a handle to the vector
-             let v = match self.vectors.get_mut(&entry.vector) {
-                 Some(v) => v,
-                 None => {
-                     // Remove the entries we've added so far + return error
-                     self.vectors = backtrack;
-                     return Err(format!("Couldn't find vector: {}", entry.vector));
-                 }
-             };
+        // Get the set of references that each entry will store - the vector and
+        // location of reach
+        let references: Vec<(String, usize)> = entries.iter().map(|(vector, entry)| {
+            (vector.clone(), entry.index)
+        }).collect();
 
-             // Try and insert it into the BumpyVector
-             match v.insert(entry.entry) {
-                 Ok(()) => (),
-                 Err(e) => {
-                     // Remove the entries we've added so far + return error
-                     self.vectors = backtrack;
-                     return Err(format!("Error inserting into vector: {}", e));
-                 }
-             }
+        println!("==");
+        println!("References: {:?}", references);
+        println!("==");
+
+        for (vector, entry) in entries {
+            // Try and get a handle to the vector
+            let v = match self.vectors.get_mut(&vector) {
+                Some(v) => v,
+                None => {
+                    // Remove the entries we've added so far + return error
+                    self.vectors = backtrack;
+                    return Err(format!("Couldn't find vector: {}", vector));
+                }
+            };
+
+            // Unwrap the BumpyEntry so we can make a new one with a MultiEntry
+            let entry = MultiEntry::wrap_entry(vector, entry, references.clone());
+
+            // Try and insert it into the BumpyVector
+            match v.insert(entry) {
+                Ok(()) => (),
+                Err(e) => {
+                    // Remove the entries we've added so far + return error
+                    self.vectors = backtrack;
+                    return Err(format!("Error inserting into vector: {}", e));
+                }
+            }
         }
 
         Ok(())
     }
 
-    pub fn remove_entries(_vector: &str, _address: usize) -> Vec<MultiEntry<T>> {
-        Vec::new()
+    fn _remove_entry(&mut self, vector: &str, address: usize) -> Option<BumpyEntry<MultiEntry<T>>> {
+        let v = match self.vectors.get_mut(vector) {
+            Some(v) => v,
+            None => return None,
+        };
+
+        return v.remove(address);
     }
 
-    // Remove from a group
-    pub fn unlink_entry(_vector: &str, _address: usize) {
+    pub fn remove_entries(&mut self, vector: &str, address: usize) -> Result<Vec<BumpyEntry<T>>, &'static str> {
+        let (v, e, f) = match self._remove_entry(vector, address) {
+            Some(e) => MultiEntry::unwrap_entry(e),
+            None => return Err("Could not find entry"),
+        };
+
+        Ok(vec![])
     }
 
-    pub fn get_single(_vector: String, _address: usize) -> Option<MultiEntry<&'a T>> {
-        None
-    }
+    // // Remove from a group
+    // pub fn unlink_entry(_vector: &str, _address: usize) {
+    // }
 
-    pub fn get_group(_vector: String, _address: usize) -> Option<Vec<MultiEntry<&'a T>>> {
-        None
-    }
+    // pub fn get_single(_vector: String, _address: usize) -> Option<MultiEntry<&'a T>> {
+    //     None
+    // }
 
-    pub fn len_vector(_vector: &str) {
-    }
+    // pub fn get_group(_vector: String, _address: usize) -> Option<Vec<MultiEntry<&'a T>>> {
+    //     None
+    // }
 
-    pub fn len() -> usize {
-        0
-    }
+    // pub fn len_vector(_vector: &str) {
+    // }
+
+    // pub fn len() -> usize {
+    //     0
+    // }
 }
 
 #[cfg(test)]
@@ -157,18 +202,19 @@ mod tests {
         let mut test: MultiVector<u32> = MultiVector::new();
         println!("{:?}", test);
 
-        test.insert_vector("test", BumpyVector::new(100));
+        test.create_vector("test", 100);
 
-        let mut entries: Vec<MultiEntry<u32>> = vec![
-            ("test".into(), 123, 0, 1).into(),
-            ("test".into(), 123, 1, 1).into(),
-            ("test".into(), 123, 2, 1).into(),
-            ("test".into(), 123, 3, 1).into(),
-            ("test".into(), 123, 4, 1).into(),
+        let mut entries: Vec<(String, BumpyEntry<u32>)> = vec![
+            ("test".into(), (123, 0, 1).into()),
+            ("test".into(), (123, 5, 1).into()),
+            ("test".into(), (123, 10, 1).into()),
+            ("test".into(), (123, 11, 1).into()),
+            ("test".into(), (123, 20, 1).into()),
         ];
 
         println!("Before: {:?}", test);
         println!();
+
         match test.insert_entries(entries) {
             Ok(()) => println!(" ** OK **"),
             Err(e) => println!("ERR: {:?}", e),
