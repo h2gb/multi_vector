@@ -17,6 +17,7 @@ readme = "README.md"
 # Serialize / deserialize are disabled by default
 serde = { version = "~1.0.110", optional = false }
 ron   = { version = "~0.5.1",   optional = false }
+simple-error = "~0.2.1"
 bumpy_vector = { path = "/home/ron/projects/bumpy_vector", features = ["serde"] }
 
 [dev-dependencies]
