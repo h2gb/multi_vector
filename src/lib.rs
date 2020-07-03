@@ -28,18 +28,18 @@ that.
 // Basically a BumpyEntry + a string for the name
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-struct MultiEntry<T> {
-    vector: String,
-    data: T,
-    friends: Vec<(String, usize)>,
+pub struct MultiEntry<T> {
+    pub vector: String,
+    pub data: T,
+    pub linked: Vec<(String, usize)>,
 }
 
 impl<T> MultiEntry<T> {
-    fn wrap_entry(vector: &str, entry: BumpyEntry<T>, friends: Vec<(String, usize)>) -> BumpyEntry<MultiEntry<T>> {
+    fn wrap_entry(vector: &str, entry: BumpyEntry<T>, linked: Vec<(String, usize)>) -> BumpyEntry<MultiEntry<T>> {
         BumpyEntry {
             entry: MultiEntry {
                 vector: String::from(vector),
-                friends: friends,
+                linked: linked,
                 data: entry.entry,
             },
             index: entry.index,
@@ -50,9 +50,9 @@ impl<T> MultiEntry<T> {
     // fn unwrap_entry(entry: BumpyEntry<MultiEntry<T>>) -> (String, BumpyEntry<T>, Vec<(String, usize)>) {
     //     let vector = entry.entry.vector;
     //     let data = entry.entry.data;
-    //     let friends = entry.entry.friends;
+    //     let linked = entry.entry.linked;
 
-    //     (vector, BumpyEntry { entry: data, index: entry.index, size: entry.size }, friends)
+    //     (vector, BumpyEntry { entry: data, index: entry.index, size: entry.size }, linked)
     // }
 }
 
@@ -123,10 +123,6 @@ where
             (String::from(*vector), entry.index)
         }).collect();
 
-        println!("==");
-        println!("References: {:?}", references);
-        println!("==");
-
         for (vector, entry) in entries {
             // Try and get a handle to the vector
             let v = match self.vectors.get_mut(vector) {
@@ -171,13 +167,32 @@ where
     // pub fn unlink_entry(_vector: &str, _address: usize) {
     // }
 
-    // pub fn get_entry(_vector: String, _address: usize) -> Option<MultiEntry<&'a T>> {
-    //     None
-    // }
+    pub fn get_entry(&self, vector: &str, address: usize) -> Option<&BumpyEntry<MultiEntry<T>>> {
+        let v = self.vectors.get(vector)?;
 
-    // pub fn get_entries(_vector: String, _address: usize) -> Option<Vec<MultiEntry<&'a T>>> {
-    //     None
-    // }
+        v.get(address)
+    }
+
+    // This guarantees that the response vector will have entries in the same
+    // order as they were inserted. In case that matters.
+    pub fn get_entries(&self, vector: &str, address: usize) -> SimpleResult<Vec<Option<&BumpyEntry<MultiEntry<T>>>>> {
+        let v = match self.vectors.get(vector) {
+            Some(v) => v,
+            None    => bail!("Couldn't find vector: {}", vector),
+        };
+
+        let linked = match v.get(address) {
+            Some(e) => &e.entry.linked,
+            None => bail!("Couldn't find address {} in vector {}", address, vector),
+        };
+
+        let mut results: Vec<Option<&BumpyEntry<MultiEntry<T>>>> = Vec::new();
+        for (vector, address) in linked {
+            results.push(self.get_entry(vector, *address));
+        }
+
+        Ok(results)
+    }
 
     // Get the number of vectors
     pub fn vector_count(&self) -> usize {
@@ -237,6 +252,40 @@ mod tests {
         let removed_size = mv.destroy_vector("name2")?;
         assert_eq!(100, removed_size);
         assert_eq!(0, mv.vector_count());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_destroy_vector_fails_with_entries() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+
+        // No vectors to start with
+        assert_eq!(0, mv.vector_count());
+
+        // Create a 1000-element vector
+        mv.create_vector("name", 1000)?;
+        assert_eq!(1, mv.vector_count());
+
+        // Create a second vector
+        mv.create_vector("name2", 100)?;
+        assert_eq!(2, mv.vector_count());
+
+        // Populate "name2"
+        mv.insert_entries(vec![
+            ("name2", (123,  10,  10).into()),
+        ])?;
+
+        // "name" is still empty, it can be destroyed
+        let removed_size = mv.destroy_vector("name")?;
+        assert_eq!(1000, removed_size);
+        assert_eq!(1, mv.vector_count());
+
+        // "name2" has an entry, so it can't be removed
+        assert!(mv.destroy_vector("name2").is_err());
+        assert_eq!(1, mv.vector_count());
+
+        // TODO: Remove entries and try again
 
         Ok(())
     }
@@ -304,19 +353,149 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_invalid_entries() {
+    fn test_insert_invalid_entries() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+        mv.create_vector("vector1", 100)?;
+        mv.create_vector("vector2", 200)?;
+
+        // Invalid vector
+        assert!(mv.insert_entries(vec![
+            ("fakevector", (123,  0,  1).into()),
+        ]).is_err());
+
+        // No entry should be added
+        assert_eq!(0, mv.len());
+
+        // Off the end
+        assert!(mv.insert_entries(vec![
+            ("vector1", (123,  0,  1000).into()),
+        ]).is_err());
+
+        // No entry should be added
+        assert_eq!(0, mv.len());
+
+        // Zero length
+        assert!(mv.insert_entries(vec![
+            ("vector1", (123,  0,  0).into()),
+        ]).is_err());
+
+        // No entry should be added
+        assert_eq!(0, mv.len());
+
+        // Overlapping entries
+        assert!(mv.insert_entries(vec![
+            ("vector1", (123,  10,  10).into()),
+            ("vector1", (123,  20,  10).into()),
+            ("vector1", (123,  15,   1).into()),
+            ("vector1", (123,  50,  10).into()),
+        ]).is_err());
+
+        // No entry should be added - this is the most important one, since the
+        // entries above need to be backed out
+        assert_eq!(0, mv.len());
+
+        Ok(())
     }
 
     #[test]
-    fn test_remove_fails_with_entries() {
+    fn test_get_entry() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+        mv.create_vector("vector1", 100)?;
+        mv.create_vector("vector2", 200)?;
+
+        // One group of entries
+        mv.insert_entries(vec![
+            // (vector_name, ( data, index, length ) )
+            ("vector1", (111, 0,   1).into()),
+            ("vector1", (222, 5,   5).into()),
+            ("vector2", (444, 0, 100).into()),
+        ])?;
+
+        mv.insert_entries(vec![
+            ("vector1", (333, 10, 10).into()),
+            ("vector2", (555, 100, 100).into()),
+        ])?;
+
+        // Verify that all entries are there
+        assert_eq!(5, mv.len());
+
+        // Get a couple entries and make sure they're correct
+        assert_eq!(111, mv.get_entry("vector1",   0).unwrap().entry.data);
+        assert_eq!(222, mv.get_entry("vector1",   6).unwrap().entry.data);
+        assert_eq!(555, mv.get_entry("vector2", 115).unwrap().entry.data);
+
+        // Get some bad entries, make sure they're errors
+        assert!(mv.get_entry("badvector", 123).is_none());
+        assert!(mv.get_entry("vector1",  1000).is_none());
+        assert!(mv.get_entry("vector1",    50).is_none());
+
+        Ok(())
     }
 
     #[test]
-    fn test_get_entries() {
-    }
+    fn test_get_entries() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+        mv.create_vector("vector1", 100)?;
+        mv.create_vector("vector2", 200)?;
 
-    #[test]
-    fn test_get_single_entry() {
+        // One group of entries
+        mv.insert_entries(vec![
+            // (vector_name, ( data, index, length ) )
+            ("vector1", (111, 0,   1).into()),
+            ("vector1", (222, 5,   5).into()),
+            ("vector2", (444, 0, 100).into()),
+        ])?;
+
+        mv.insert_entries(vec![
+            ("vector2", (555, 100, 100).into()),
+            ("vector1", (333, 10, 10).into()),
+        ])?;
+
+        // Verify that all entries are there
+        assert_eq!(5, mv.len());
+
+        // Get the first entry at its start
+        let group1 = mv.get_entries("vector1", 0).unwrap();
+        assert_eq!(3, group1.len());
+
+        assert_eq!(111, group1[0].unwrap().entry.data);
+        assert_eq!("vector1", group1[0].unwrap().entry.vector);
+
+        assert_eq!(222, group1[1].unwrap().entry.data);
+        assert_eq!("vector1", group1[1].unwrap().entry.vector);
+
+        assert_eq!(444, group1[2].unwrap().entry.data);
+        assert_eq!("vector2", group1[2].unwrap().entry.vector);
+
+        // Get the last entry (in the first group) in the middle
+        let group1 = mv.get_entries("vector2", 50).unwrap();
+        assert_eq!(3, group1.len());
+
+        assert_eq!(111, group1[0].unwrap().entry.data);
+        assert_eq!("vector1", group1[0].unwrap().entry.vector);
+
+        assert_eq!(222, group1[1].unwrap().entry.data);
+        assert_eq!("vector1", group1[1].unwrap().entry.vector);
+
+        assert_eq!(444, group1[2].unwrap().entry.data);
+        assert_eq!("vector2", group1[2].unwrap().entry.vector);
+
+        // Get the second group
+        let group2 = mv.get_entries("vector2", 150).unwrap();
+        assert_eq!(2, group2.len());
+
+        assert_eq!(555, group2[0].unwrap().entry.data);
+        assert_eq!("vector2", group2[0].unwrap().entry.vector);
+
+        assert_eq!(333, group2[1].unwrap().entry.data);
+        assert_eq!("vector1", group2[1].unwrap().entry.vector);
+
+        // Get some bad entries, make sure they're errors
+        assert!(mv.get_entry("badvector", 123).is_none());
+        assert!(mv.get_entry("vector1",  1000).is_none());
+        assert!(mv.get_entry("vector1",    50).is_none());
+
+        Ok(())
     }
 
     #[test]
