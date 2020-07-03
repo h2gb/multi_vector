@@ -151,9 +151,40 @@ where
         Ok(())
     }
 
-    // // Remove from a group
-    // pub fn unlink_entry(_vector: &str, _address: usize) {
-    // }
+    // Remove from a group
+    pub fn unlink_entry(&mut self, vector: &str, address: usize) -> SimpleResult<()> {
+        // This will be a NEW vector of references
+        let new_linked: Vec<(String, usize)> = match self.vectors.get_mut(vector) {
+            Some(v) => match v.get_mut(address) {
+                Some(e) => {
+                    // Get the original links
+                    let original_links = e.entry.linked.clone(); // TODO: Can I avoid this clone?
+
+                    // Its only link is itself now
+                    e.entry.linked = vec![(String::from(vector), e.index)];
+
+                    // Return the remaining links, with the unlinked one removed
+                    original_links.into_iter().filter(|(v, a)| {
+                        // Reminder: we can't use `*a == address` here, since
+                        // `address` isn't necessarily the start.
+                        !(v == vector && *a == e.index)
+                    }).collect()
+                }
+                None => bail!("Couldn't find address {} in vector {}", address, vector),
+            },
+            None => bail!("Couldn't find vector: {}", vector),
+        };
+
+        // Loop through the remaining linked entries and replace the links
+        for (vector, address) in new_linked.iter() {
+            let v = self.vectors.get_mut(vector).unwrap();
+            let e = v.get_mut(*address).unwrap();
+
+            e.entry.linked = new_linked.clone();
+        }
+
+        Ok(())
+    }
 
     pub fn get_entry(&self, vector: &str, address: usize) -> Option<&BumpyEntry<MultiEntry<T>>> {
         let v = self.vectors.get(vector)?;
@@ -516,10 +547,6 @@ mod tests {
     }
 
     #[test]
-    fn test_unlink_entry() {
-    }
-
-    #[test]
     fn test_remove_entries() -> SimpleResult<()> {
         let mut mv: MultiVector<u32> = MultiVector::new();
         mv.create_vector("vector1", 100)?;
@@ -574,6 +601,53 @@ mod tests {
         assert!(mv.remove_entries("badvector", 123).is_err());
         assert!(mv.remove_entries("vector1",  1000).is_err());
         assert!(mv.remove_entries("vector1",    50).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_unlink_entry() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+        mv.create_vector("vector1", 100)?;
+        mv.create_vector("vector2", 200)?;
+
+        // One group of entries
+        mv.insert_entries(vec![
+            // (vector_name, ( data, index, length ) )
+            ("vector1", (111, 0,   1).into()),
+            ("vector1", (222, 5,   5).into()),
+            ("vector2", (444, 0, 100).into()), // Will be unlinked for test
+        ])?;
+
+        mv.insert_entries(vec![
+            ("vector2", (555, 100, 100).into()), // Will be unlinked for test
+            ("vector1", (333, 10, 10).into()),
+        ])?;
+
+        // Verify that all entries are there
+        assert_eq!(5, mv.len());
+
+        // Unlink a couple entries
+        mv.unlink_entry("vector2",  50)?;
+
+        mv.unlink_entry("vector2", 150)?;
+
+        // Remove one
+        let removed = mv.remove_entries("vector2", 50)?;
+        assert_eq!(1, removed.len());
+        assert_eq!(4, mv.len());
+
+        // Remove the other
+        let removed = mv.remove_entries("vector2", 100)?;
+        assert_eq!(1, removed.len());
+        assert_eq!(3, mv.len());
+
+        // Remove the rest of the first group
+        let removed = mv.remove_entries("vector1", 0)?;
+        assert_eq!(2, removed.len());
+        assert_eq!(1, mv.len());
+
+        // TODO: Test error conditions
 
         Ok(())
     }
