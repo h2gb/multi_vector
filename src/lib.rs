@@ -55,7 +55,6 @@ where
     ///
     /// # Example
     /// ```
-    /// bail!("Not implemented");
     /// ```
     pub fn create_vector(&mut self, name: &str, max_size: usize) -> SimpleResult<()> {
         if self.vectors.contains_key(name) {
@@ -608,6 +607,11 @@ mod tests {
 
         mv.unlink_entry("vector2", 150)?;
 
+        // Test error conditions
+        assert!(mv.unlink_entry("badvector", 123).is_err());
+        assert!(mv.unlink_entry("vector1",  1000).is_err());
+        assert!(mv.unlink_entry("vector1",    50).is_err());
+
         // Remove one
         let removed = mv.remove_entries("vector2", 50)?;
         assert_eq!(1, removed.len());
@@ -622,8 +626,6 @@ mod tests {
         let removed = mv.remove_entries("vector1", 0)?;
         assert_eq!(2, removed.len());
         assert_eq!(1, mv.len());
-
-        // TODO: Test error conditions
 
         Ok(())
     }
