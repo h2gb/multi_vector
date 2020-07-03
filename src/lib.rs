@@ -146,31 +146,30 @@ where
     }
 
     // Remove from a group
-    // TODO: Replace address with index
-    pub fn unlink_entry(&mut self, vector: &str, address: usize) -> SimpleResult<()> {
+    pub fn unlink_entry(&mut self, vector: &str, index: usize) -> SimpleResult<()> {
         // This will be a NEW vector of references
         let new_linked: Vec<(String, usize)> = match self.vectors.get_mut(vector) {
-            Some(v) => match v.get_mut(address) {
+            Some(v) => match v.get_mut(index) {
                 Some(e) => {
                     // Swap out the linked entry for an empty one
                     let original_links = mem::replace(&mut e.entry.linked, vec![(String::from(vector), e.index)]);
 
                     // Return the remaining links, with the unlinked one removed
-                    original_links.into_iter().filter(|(v, a)| {
-                        // Reminder: we can't use `*a == address` here, since
-                        // `address` isn't necessarily the start.
-                        !(v == vector && *a == e.index)
+                    original_links.into_iter().filter(|(v, i)| {
+                        // Reminder: we can't use `*i == index` here, since
+                        // `index` isn't necessarily the start.
+                        !(v == vector && *i == e.index)
                     }).collect()
                 }
-                None => bail!("Couldn't find address {} in vector {}", address, vector),
+                None => bail!("Couldn't find index {} in vector {}", index, vector),
             },
             None => bail!("Couldn't find vector: {}", vector),
         };
 
         // Loop through the remaining linked entries and replace the links
-        for (vector, address) in new_linked.iter() {
+        for (vector, index) in new_linked.iter() {
             let v = self.vectors.get_mut(vector).unwrap();
-            let e = v.get_mut(*address).unwrap();
+            let e = v.get_mut(*index).unwrap();
 
             e.entry.linked = new_linked.clone();
         }
@@ -178,46 +177,46 @@ where
         Ok(())
     }
 
-    pub fn get_entry(&self, vector: &str, address: usize) -> Option<&BumpyEntry<MultiEntry<T>>> {
+    pub fn get_entry(&self, vector: &str, index: usize) -> Option<&BumpyEntry<MultiEntry<T>>> {
         let v = self.vectors.get(vector)?;
 
-        v.get(address)
+        v.get(index)
     }
 
     // This guarantees that the response vector will have entries in the same
     // order as they were inserted. In case that matters.
-    pub fn get_entries(&self, vector: &str, address: usize) -> SimpleResult<Vec<Option<&BumpyEntry<MultiEntry<T>>>>> {
+    pub fn get_entries(&self, vector: &str, index: usize) -> SimpleResult<Vec<Option<&BumpyEntry<MultiEntry<T>>>>> {
         let linked = match self.vectors.get(vector) {
-            Some(v) => match v.get(address) {
+            Some(v) => match v.get(index) {
                 Some(e) => &e.entry.linked,
-                None => bail!("Couldn't find address {} in vector {}", address, vector),
+                None => bail!("Couldn't find index {} in vector {}", index, vector),
             },
             None => bail!("Couldn't find vector: {}", vector),
         };
 
         let mut results: Vec<Option<&BumpyEntry<MultiEntry<T>>>> = Vec::new();
-        for (vector, address) in linked {
-            results.push(self.get_entry(vector, *address));
+        for (vector, index) in linked {
+            results.push(self.get_entry(vector, *index));
         }
 
         Ok(results)
     }
 
-    pub fn remove_entries(&mut self, vector: &str, address: usize) -> SimpleResult<Vec<Option<BumpyEntry<MultiEntry<T>>>>> {
+    pub fn remove_entries(&mut self, vector: &str, index: usize) -> SimpleResult<Vec<Option<BumpyEntry<MultiEntry<T>>>>> {
         let linked = match self.vectors.get(vector) {
-            Some(v) => match v.get(address) {
+            Some(v) => match v.get(index) {
                 Some(e) => e.entry.linked.clone(),
-                None => bail!("Couldn't find address {} in vector {}", address, vector),
+                None => bail!("Couldn't find index {} in vector {}", index, vector),
             },
             None => bail!("Couldn't find vector: {}", vector),
         };
 
 
         let mut results: Vec<Option<BumpyEntry<MultiEntry<T>>>> = Vec::new();
-        for (vector, address) in linked {
+        for (vector, index) in linked {
             match self.vectors.get_mut(&vector) {
                 Some(v) => {
-                    results.push(v.remove(address));
+                    results.push(v.remove(index));
                 },
                 // Bad reference (shouldn't happen)
                 None => results.push(None),
