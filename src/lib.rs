@@ -1,70 +1,29 @@
-use std::collections::HashMap;
 use bumpy_vector::{BumpyVector, BumpyEntry};
-use std::fmt::Debug;
 use simple_error::{SimpleResult, bail};
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::mem;
 
 #[cfg(feature = "serialize")]
 use serde::{Serialize, Deserialize};
 
-/*
-
-This is a whole new idea..
-
-This class is a way to 'group' entries that are inserted together. The design
-is entirely for h2gb's arrays, structs, and so on.
-
-In other words, it's for storing non-contiguous stuff that could span multiple
-vectors, grouped together so you have to remove them all at once. I don't think
-we need a way to "break" entries, but we can worry about that later.
-
-When creating an entry, multiple entries over multiple vectors can be created.
-When you remove one, you remove all of them.
-
-This is NOT for references, or cross references, or loops, or anything like
-that.
-
-*/
-
-// Basically a BumpyEntry + a string for the name
+/// Wraps the `T` type in an object with more information.
+///
+/// This is automatically created by `MultiVector` when inserting elements.
+/// It is, however, returned in several places. It helpfully encodes the vector
+/// into itself.
+///
+/// I left `linked` private, because I don't particularly like it existing. I'm
+/// hoping to remove it eventually.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct MultiEntry<T> {
     pub vector: String,
     pub data: T,
-    pub linked: Vec<(String, usize)>,
+    linked: Vec<(String, usize)>,
 }
 
-impl<T> MultiEntry<T> {
-    fn wrap_entry(vector: &str, entry: BumpyEntry<T>, linked: Vec<(String, usize)>) -> BumpyEntry<MultiEntry<T>> {
-        BumpyEntry {
-            entry: MultiEntry {
-                vector: String::from(vector),
-                linked: linked,
-                data: entry.entry,
-            },
-            index: entry.index,
-            size: entry.size,
-        }
-    }
-
-    // fn unwrap_entry(entry: BumpyEntry<MultiEntry<T>>) -> (String, BumpyEntry<T>, Vec<(String, usize)>) {
-    //     let vector = entry.entry.vector;
-    //     let data = entry.entry.data;
-    //     let linked = entry.entry.linked;
-
-    //     (vector, BumpyEntry { entry: data, index: entry.index, size: entry.size }, linked)
-    // }
-}
-
-// impl<T> From<(String, Vec<(String, usize)>, BumpyEntry<T>)> for MultiEntry<T> {
-//     fn from(o: (String, BumpyEntry<T>)) -> Self {
-//         MultiEntry {
-//           vector: o.0,
-//           entry: o.1,
-//         }
-//     }
-// }
-
+/// The primary struct that powers the MultiVector.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct MultiVector<T>
@@ -80,12 +39,24 @@ where
     T: Clone + Debug
 {
 
+    /// Create a new - empty - instance.
     pub fn new() -> Self {
         MultiVector {
             vectors: HashMap::new(),
         }
     }
 
+    /// Create a vector with a given name and size.
+    ///
+    /// # Return
+    ///
+    /// Returns `Ok(())` if the vector is successfully created, or `Err(s)` with
+    /// a descriptive error message if it can't be created.
+    ///
+    /// # Example
+    /// ```
+    /// bail!("Not implemented");
+    /// ```
     pub fn create_vector(&mut self, name: &str, max_size: usize) -> SimpleResult<()> {
         if self.vectors.contains_key(name) {
             bail!("Vector with that name already exists");
@@ -134,8 +105,16 @@ where
                 }
             };
 
-            // Unwrap the BumpyEntry so we can make a new one with a MultiEntry
-            let entry = MultiEntry::wrap_entry(vector, entry, references.clone());
+            // Unwrap the BumpyEntry and make a new one with a MultiEntry instead
+            let entry = BumpyEntry {
+                entry: MultiEntry {
+                    vector: String::from(vector),
+                    linked: references.clone(),
+                    data: entry.entry,
+                },
+                index: entry.index,
+                size: entry.size,
+            };
 
             // Try and insert it into the BumpyVector
             match v.insert(entry) {
@@ -157,11 +136,8 @@ where
         let new_linked: Vec<(String, usize)> = match self.vectors.get_mut(vector) {
             Some(v) => match v.get_mut(address) {
                 Some(e) => {
-                    // Get the original links
-                    let original_links = e.entry.linked.clone(); // TODO: Can I avoid this clone?
-
-                    // Its only link is itself now
-                    e.entry.linked = vec![(String::from(vector), e.index)];
+                    // Swap out the linked entry for an empty one
+                    let original_links = mem::replace(&mut e.entry.linked, vec![(String::from(vector), e.index)]);
 
                     // Return the remaining links, with the unlinked one removed
                     original_links.into_iter().filter(|(v, a)| {
