@@ -151,18 +151,6 @@ where
         Ok(())
     }
 
-    // fn _remove_entry(&mut self, vector: &str, address: usize) -> Option<BumpyEntry<MultiEntry<T>>> {
-    //     self.vectors.get_mut(vector)?.remove(address)
-    // }
-
-    // fn _get_entry(&self, vector: &str, address: usize) -> Option<&BumpyEntry<MultiEntry<T>>> {
-    //     self.vectors.get(vector)?.get(address)
-    // }
-
-    // pub fn remove_entries(&mut self, vector: &str, address: usize) -> Result<Vec<BumpyEntry<T>>, &'static str> {
-    //     Ok(vec![])
-    // }
-
     // // Remove from a group
     // pub fn unlink_entry(_vector: &str, _address: usize) {
     // }
@@ -176,19 +164,41 @@ where
     // This guarantees that the response vector will have entries in the same
     // order as they were inserted. In case that matters.
     pub fn get_entries(&self, vector: &str, address: usize) -> SimpleResult<Vec<Option<&BumpyEntry<MultiEntry<T>>>>> {
-        let v = match self.vectors.get(vector) {
-            Some(v) => v,
-            None    => bail!("Couldn't find vector: {}", vector),
-        };
-
-        let linked = match v.get(address) {
-            Some(e) => &e.entry.linked,
-            None => bail!("Couldn't find address {} in vector {}", address, vector),
+        let linked = match self.vectors.get(vector) {
+            Some(v) => match v.get(address) {
+                Some(e) => &e.entry.linked,
+                None => bail!("Couldn't find address {} in vector {}", address, vector),
+            },
+            None => bail!("Couldn't find vector: {}", vector),
         };
 
         let mut results: Vec<Option<&BumpyEntry<MultiEntry<T>>>> = Vec::new();
         for (vector, address) in linked {
             results.push(self.get_entry(vector, *address));
+        }
+
+        Ok(results)
+    }
+
+    pub fn remove_entries(&mut self, vector: &str, address: usize) -> SimpleResult<Vec<Option<BumpyEntry<MultiEntry<T>>>>> {
+        let linked = match self.vectors.get(vector) {
+            Some(v) => match v.get(address) {
+                Some(e) => e.entry.linked.clone(),
+                None => bail!("Couldn't find address {} in vector {}", address, vector),
+            },
+            None => bail!("Couldn't find vector: {}", vector),
+        };
+
+
+        let mut results: Vec<Option<BumpyEntry<MultiEntry<T>>>> = Vec::new();
+        for (vector, address) in linked {
+            match self.vectors.get_mut(&vector) {
+                Some(v) => {
+                    results.push(v.remove(address));
+                },
+                // Bad reference (shouldn't happen)
+                None => results.push(None),
+            }
         }
 
         Ok(results)
@@ -274,6 +284,7 @@ mod tests {
         // Populate "name2"
         mv.insert_entries(vec![
             ("name2", (123,  10,  10).into()),
+            ("name2", (123,  20,  10).into()),
         ])?;
 
         // "name" is still empty, it can be destroyed
@@ -285,7 +296,13 @@ mod tests {
         assert!(mv.destroy_vector("name2").is_err());
         assert_eq!(1, mv.vector_count());
 
-        // TODO: Remove entries and try again
+        // Remove the entries
+        mv.remove_entries("name2", 25)?;
+
+        // Try again
+        let removed_size = mv.destroy_vector("name2")?;
+        assert_eq!(100, removed_size);
+        assert_eq!(0, mv.vector_count());
 
         Ok(())
     }
@@ -455,7 +472,7 @@ mod tests {
         assert_eq!(5, mv.len());
 
         // Get the first entry at its start
-        let group1 = mv.get_entries("vector1", 0).unwrap();
+        let group1 = mv.get_entries("vector1", 0)?;
         assert_eq!(3, group1.len());
 
         assert_eq!(111, group1[0].unwrap().entry.data);
@@ -468,7 +485,7 @@ mod tests {
         assert_eq!("vector2", group1[2].unwrap().entry.vector);
 
         // Get the last entry (in the first group) in the middle
-        let group1 = mv.get_entries("vector2", 50).unwrap();
+        let group1 = mv.get_entries("vector2", 50)?;
         assert_eq!(3, group1.len());
 
         assert_eq!(111, group1[0].unwrap().entry.data);
@@ -481,7 +498,7 @@ mod tests {
         assert_eq!("vector2", group1[2].unwrap().entry.vector);
 
         // Get the second group
-        let group2 = mv.get_entries("vector2", 150).unwrap();
+        let group2 = mv.get_entries("vector2", 150)?;
         assert_eq!(2, group2.len());
 
         assert_eq!(555, group2[0].unwrap().entry.data);
@@ -491,9 +508,9 @@ mod tests {
         assert_eq!("vector1", group2[1].unwrap().entry.vector);
 
         // Get some bad entries, make sure they're errors
-        assert!(mv.get_entry("badvector", 123).is_none());
-        assert!(mv.get_entry("vector1",  1000).is_none());
-        assert!(mv.get_entry("vector1",    50).is_none());
+        assert!(mv.get_entries("badvector", 123).is_err());
+        assert!(mv.get_entries("vector1",  1000).is_err());
+        assert!(mv.get_entries("vector1",    50).is_err());
 
         Ok(())
     }
@@ -503,6 +520,61 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_entries() {
+    fn test_remove_entries() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+        mv.create_vector("vector1", 100)?;
+        mv.create_vector("vector2", 200)?;
+
+        // One group of entries
+        mv.insert_entries(vec![
+            // (vector_name, ( data, index, length ) )
+            ("vector1", (111, 0,   1).into()),
+            ("vector1", (222, 5,   5).into()),
+            ("vector2", (444, 0, 100).into()),
+        ])?;
+
+        mv.insert_entries(vec![
+            ("vector2", (555, 100, 100).into()),
+            ("vector1", (333, 10, 10).into()),
+        ])?;
+
+        // Verify that all entries are there
+        assert_eq!(5, mv.len());
+
+        // Get the first entry at its start
+        let group1 = mv.remove_entries("vector1", 0)?;
+
+        // The group had 3 entries
+        assert_eq!(3, group1.len());
+
+        // Make sure they're actually removed
+        assert_eq!(2, mv.len());
+        assert!(mv.remove_entries("vector1", 0).is_err());
+
+        assert_eq!(111, group1[0].as_ref().unwrap().entry.data);
+        assert_eq!("vector1", group1[0].as_ref().unwrap().entry.vector);
+
+        assert_eq!(222, group1[1].as_ref().unwrap().entry.data);
+        assert_eq!("vector1", group1[1].as_ref().unwrap().entry.vector);
+
+        assert_eq!(444, group1[2].as_ref().unwrap().entry.data);
+        assert_eq!("vector2", group1[2].as_ref().unwrap().entry.vector);
+
+        // Get the second group
+        let group2 = mv.remove_entries("vector2", 150)?;
+        assert_eq!(2, group2.len());
+
+        assert_eq!(555, group2[0].as_ref().unwrap().entry.data);
+        assert_eq!("vector2", group2[0].as_ref().unwrap().entry.vector);
+
+        assert_eq!(333, group2[1].as_ref().unwrap().entry.data);
+        assert_eq!("vector1", group2[1].as_ref().unwrap().entry.vector);
+
+        // Get some bad entries, make sure they're errors
+        assert!(mv.remove_entries("badvector", 123).is_err());
+        assert!(mv.remove_entries("vector1",  1000).is_err());
+        assert!(mv.remove_entries("vector1",    50).is_err());
+
+        Ok(())
     }
 }
