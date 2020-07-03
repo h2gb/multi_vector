@@ -82,16 +82,26 @@ where
         }
     }
 
-    pub fn insert_entries(&mut self, entries: Vec<(&str, BumpyEntry<T>)>) -> SimpleResult<()> {
-        // Clone the full set so we can backtrack if things go wrong
-        // XXX: This is JUST for testing! This is incredibly slow!
-        let backtrack = self.vectors.clone();
+    pub fn _force_remove(&mut self, entries: Vec<(&str, usize)>) {
+        for (vector, index) in entries {
+            match self.vectors.get_mut(vector) {
+                Some(v) => {
+                    v.remove(index);
+                },
+                None => (),
+            };
+        }
+    }
 
+    pub fn insert_entries(&mut self, entries: Vec<(&str, BumpyEntry<T>)>) -> SimpleResult<()> {
         // Get the set of references that each entry will store - the vector and
         // location of reach
         let references: Vec<(String, usize)> = entries.iter().map(|(vector, entry)| {
             (String::from(*vector), entry.index)
         }).collect();
+
+        // We need a way to back out only entries that we've added - handle that
+        let mut backtrack: Vec<(&str, usize)> = Vec::new();
 
         for (vector, entry) in entries {
             // Try and get a handle to the vector
@@ -99,10 +109,13 @@ where
                 Some(v) => v,
                 None => {
                     // Remove the entries we've added so far + return error
-                    self.vectors = backtrack;
+                    self._force_remove(backtrack);
                     bail!("Couldn't find vector: {}", vector);
                 }
             };
+
+            // Grab a copy of the index, since we'll need to save it later
+            let index = entry.index;
 
             // Unwrap the BumpyEntry and make a new one with a MultiEntry instead
             let entry = BumpyEntry {
@@ -120,16 +133,20 @@ where
                 Ok(()) => (),
                 Err(e) => {
                     // Remove the entries we've added so far + return error
-                    self.vectors = backtrack;
+                    self._force_remove(backtrack);
                     bail!("Error inserting into vector: {}", e);
                 }
             }
+
+            // Track what's been added
+            backtrack.push((vector, index));
         }
 
         Ok(())
     }
 
     // Remove from a group
+    // TODO: Replace address with index
     pub fn unlink_entry(&mut self, vector: &str, address: usize) -> SimpleResult<()> {
         // This will be a NEW vector of references
         let new_linked: Vec<(String, usize)> = match self.vectors.get_mut(vector) {
@@ -381,31 +398,49 @@ mod tests {
         mv.create_vector("vector1", 100)?;
         mv.create_vector("vector2", 200)?;
 
+        // Add a couple real entries so we can make sure we don't overwrite
+        // or remove them
+        mv.insert_entries(vec![
+            ("vector1", (123,  0,  10).into()),
+            ("vector1", (123, 10,  10).into()),
+            ("vector1", (123, 20,  10).into()),
+            ("vector2", (123,  0,  10).into()),
+        ])?;
+        assert_eq!(4, mv.len());
+
         // Invalid vector
         assert!(mv.insert_entries(vec![
             ("fakevector", (123,  0,  1).into()),
         ]).is_err());
 
-        // No entry should be added
-        assert_eq!(0, mv.len());
+        // No entry should be added or removed
+        assert_eq!(4, mv.len());
+
+        // Overlapping
+        assert!(mv.insert_entries(vec![
+            ("vector1", (123,  0,  10).into()),
+        ]).is_err());
+
+        // No entry should be added or removed
+        assert_eq!(4, mv.len());
 
         // Off the end
         assert!(mv.insert_entries(vec![
             ("vector1", (123,  0,  1000).into()),
         ]).is_err());
 
-        // No entry should be added
-        assert_eq!(0, mv.len());
+        // No entry should be added or removed
+        assert_eq!(4, mv.len());
 
         // Zero length
         assert!(mv.insert_entries(vec![
             ("vector1", (123,  0,  0).into()),
         ]).is_err());
 
-        // No entry should be added
-        assert_eq!(0, mv.len());
+        // No entry should be added or removed
+        assert_eq!(4, mv.len());
 
-        // Overlapping entries
+        // Overlapping each other
         assert!(mv.insert_entries(vec![
             ("vector1", (123,  10,  10).into()),
             ("vector1", (123,  20,  10).into()),
@@ -413,9 +448,20 @@ mod tests {
             ("vector1", (123,  50,  10).into()),
         ]).is_err());
 
-        // No entry should be added - this is the most important one, since the
-        // entries above need to be backed out
-        assert_eq!(0, mv.len());
+        // No entry should be added or removed
+        assert_eq!(4, mv.len());
+
+        // Multiple entries that overlap - this ensures that we don't
+        // accidentally remove things from the vector that we shouldn't
+        assert!(mv.insert_entries(vec![
+            ("vector1", (123,  0,  10).into()),
+            ("vector1", (123, 10,  10).into()),
+            ("vector1", (123, 20,  10).into()),
+            ("vector2", (123,  0,  10).into()),
+        ]).is_err());
+
+        // No entry should be added or removed
+        assert_eq!(4, mv.len());
 
         Ok(())
     }
