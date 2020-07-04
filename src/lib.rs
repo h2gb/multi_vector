@@ -1038,4 +1038,28 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    #[cfg(feature = "serialize")] // Only test if we enable serialization
+    fn test_serialize() {
+        let mut mv: MultiVector<String> = MultiVector::new();
+        mv.create_vector("myvector", 20).unwrap();
+        mv.insert_entries(vec![
+            ("myvector", String::from("a"),  0, 10),
+            ("myvector", String::from("b"), 10, 10),
+        ]).unwrap();
+        assert_eq!(2, mv.len());
+
+        // Serialize
+        let serialized = ron::ser::to_string(&mv).unwrap();
+
+        // Deserialize
+        let mut mv: MultiVector<String> = ron::de::from_str(&serialized).unwrap();
+        assert_eq!(2, mv.len());
+
+        // Make sure remove still works
+        assert_eq!(2, mv.remove_entries("myvector", 0).unwrap().len());
+        assert_eq!(0, mv.len());
+    }
+
 }
