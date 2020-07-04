@@ -55,7 +55,21 @@ where
     ///
     /// # Example
     /// ```
+    /// use multi_vector::MultiVector;
+    ///
+    /// // Create an instance that stores u32 values
+    /// let mut mv: MultiVector<u32> = MultiVector::new();
+    ///
+    /// // Start with no vectors
+    /// assert_eq!(0, mv.vector_count());
+    ///
+    /// // Create a vector of size 1000
+    /// mv.create_vector("myvector", 1000).unwrap();
+    ///
+    /// // Now there's one vector
+    /// assert_eq!(1, mv.vector_count());
     /// ```
+
     pub fn create_vector(&mut self, name: &str, max_size: usize) -> SimpleResult<()> {
         if self.vectors.contains_key(name) {
             bail!("Vector with that name already exists");
@@ -66,6 +80,40 @@ where
         Ok(())
     }
 
+    /// Remove a vector with the given name.
+    ///
+    /// Vectors can only be removed if they are empty - otherwise this will
+    /// fail. The justification is, we want this to all be compatible with
+    /// undo/redo, which means removing items must be replayable. If we do two
+    /// things at once (both remove elements and the vector), the API gets
+    /// really complicated.
+    ///
+    /// # Return
+    ///
+    /// Returns a result containing either the size that the buffer was (for
+    /// ease of re-creation in an `undo()` function), or a user-consumeable
+    /// error message.
+    ///
+    /// # Example
+    /// ```
+    /// use multi_vector::MultiVector;
+    ///
+    /// // Create an instance that stores u32 values
+    /// let mut mv: MultiVector<u32> = MultiVector::new();
+    ///
+    /// // Create a vector of size 1000, then remove it
+    /// mv.create_vector("myvector", 1000).unwrap();
+    /// assert_eq!(1000, mv.destroy_vector("myvector").unwrap());
+    ///
+    /// // Create a vector of size 1000
+    /// mv.create_vector("myvector", 100).unwrap();
+    ///
+    /// // Populate it
+    /// mv.insert_entry("myvector", (111,  0, 10).into()).unwrap();
+    ///
+    /// // Fail to remove it
+    /// assert!(mv.destroy_vector("myvector").is_err());
+    /// ```
     pub fn destroy_vector(&mut self, vector: &str) -> SimpleResult<usize> {
         let v = match self.vectors.get(vector) {
             Some(v) => v,
@@ -82,7 +130,10 @@ where
         }
     }
 
-    pub fn _force_remove(&mut self, entries: Vec<(&str, usize)>) {
+    /// Remove entries without properly unlinking them.
+    ///
+    /// This is for internal use only.
+    fn _force_remove(&mut self, entries: Vec<(&str, usize)>) {
         for (vector, index) in entries {
             match self.vectors.get_mut(vector) {
                 Some(v) => {
@@ -93,6 +144,19 @@ where
         }
     }
 
+    /// Insert a grouped set of entries into the `MultiVector`.
+    ///
+    /// The `entries` argument is a vector of tuples, where the first element
+    /// is the vector name and the second is an entry.
+    ///
+    /// The entry will be re-wrapped in a BumpyEntry<MultiEntry<T>>
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     pub fn insert_entries(&mut self, entries: Vec<(&str, BumpyEntry<T>)>) -> SimpleResult<()> {
         // Get the set of references that each entry will store - the vector and
         // location of reach
@@ -145,7 +209,18 @@ where
         Ok(())
     }
 
-    // Remove from a group
+    pub fn insert_entry(&mut self, vector: &str, entry: BumpyEntry<T>) -> SimpleResult<()> {
+        self.insert_entries(vec![(vector, entry)])
+    }
+
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     pub fn unlink_entry(&mut self, vector: &str, index: usize) -> SimpleResult<()> {
         // This will be a NEW vector of references
         let new_linked: Vec<(String, usize)> = match self.vectors.get_mut(vector) {
@@ -177,12 +252,28 @@ where
         Ok(())
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     pub fn get_entry(&self, vector: &str, index: usize) -> Option<&BumpyEntry<MultiEntry<T>>> {
         let v = self.vectors.get(vector)?;
 
         v.get(index)
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     // This guarantees that the response vector will have entries in the same
     // order as they were inserted. In case that matters.
     pub fn get_entries(&self, vector: &str, index: usize) -> SimpleResult<Vec<Option<&BumpyEntry<MultiEntry<T>>>>> {
@@ -202,6 +293,14 @@ where
         Ok(results)
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     pub fn remove_entries(&mut self, vector: &str, index: usize) -> SimpleResult<Vec<Option<BumpyEntry<MultiEntry<T>>>>> {
         let linked = match self.vectors.get(vector) {
             Some(v) => match v.get(index) {
@@ -226,16 +325,40 @@ where
         Ok(results)
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     // Get the number of vectors
     pub fn vector_count(&self) -> usize {
         self.vectors.len()
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     // Is the vector a member of the MultiVector?
     pub fn vector_exists(&self, vector: &str) -> bool {
         self.vectors.contains_key(vector)
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     // Get the length of a vector, if it exists
     pub fn len_vector(&self, vector: &str) -> Option<usize> {
         let v = self.vectors.get(vector)?;
@@ -243,6 +366,14 @@ where
         Some(v.len())
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     // Get the length of a vector, if it exists
     pub fn max_size_vector(&self, vector: &str) -> Option<usize> {
         let v = self.vectors.get(vector)?;
@@ -250,6 +381,14 @@ where
         Some(v.max_size())
     }
 
+    ///
+    ///
+    /// # Return
+    ///
+    ///
+    /// # Example
+    /// ```
+    /// ```
     // Get the length of ALL vectors
     pub fn len(&self) -> usize {
         self.vectors.iter().map(|(_, v)| v.len()).sum()
@@ -387,6 +526,23 @@ mod tests {
 
         // Make sure the vectors are still tracking
         assert_eq!(4, mv.len_vector("vector1").unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_zero_entries() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+        mv.create_vector("vector1", 100)?;
+
+        // Create no entries
+        let entries: Vec<(&str, BumpyEntry<u32>)> = vec![];
+
+        // Insert them entries
+        mv.insert_entries(entries)?;
+
+        // Ensure nothing was inserted.. I guess?
+        assert_eq!(0, mv.len_vector("vector1").unwrap());
 
         Ok(())
     }
