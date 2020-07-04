@@ -1,3 +1,118 @@
+//! [![Crate](https://img.shields.io/crates/v/multi_vector.svg)](https://crates.io/crates/multi_vector)
+//!
+//! An object that holds multiple `BumpyVector`s, and can manage linked entries
+//! within a single vector, or between multiple vectors.
+//!
+//! The purpose of this is to manage pointers and structs in `h2gb`. Sometimes
+//! elements across disparate vectors (whether different layers, buffers, etc -
+//! doesn't matter) need to be bundled together.
+//!
+//! This is NOT for references, cross-references, base addresses, or keeping
+//! track of logic within a binary. This is the wrong layer for that. I
+//! struggled a lot to scope this jussst right, and I started finding that I
+//! can't do too much here.
+//!
+//! # Goal
+//!
+//! [h2gb](https://github.com/h2gb/libh2gb) is a tool for analyzing binary
+//! files. Some binary files will have multiple buffers (like sections in an
+//! ELF file, files in a TAR file, etc.). Some of those will have a creator-
+//! created relationship with each other, and we want to track that.
+//!
+//! # Usage
+//!
+//! Instantiate, add vectors, and add elements to the vectors. All elements
+//! added together, as a "group", are linked, and will be removed together.
+//!
+//! ```
+//! use multi_vector::MultiVector;
+//!
+//! // Create an instance that stores Strings
+//! let mut mv: MultiVector<u32> = MultiVector::new();
+//!
+//! // Create a pair of vectors, one that's 100 elements and one that's 200
+//! mv.create_vector("myvector1", 100).unwrap();
+//! mv.create_vector("myvector2", 200).unwrap();
+//!
+//! // Vector names must be unique
+//! assert!(mv.create_vector("myvector1", 100).is_err());
+//!
+//! // It starts with zero entries
+//! assert_eq!(0, mv.len());
+//!
+//! // Populate it with one group
+//! mv.insert_entries(vec![
+//!     ("myvector1", 111,  0, 10),
+//!     ("myvector1", 222, 10, 10),
+//! ]);
+//!
+//! // Now there are two entries
+//! assert_eq!(2, mv.len());
+//!
+//! // Populate with some more values
+//! mv.insert_entries(vec![
+//!     ("myvector1", 111,  20, 10),
+//!     ("myvector2", 222,  0,  10),
+//!     ("myvector2", 222,  10, 10),
+//! ]);
+//!
+//! // Now there are five entries!
+//! assert_eq!(5, mv.len());
+//!
+//! // Remove en entry from the first group, note that both entries get
+//! // removed
+//! assert_eq!(2, mv.remove_entries("myvector1", 15).unwrap().len());
+//! assert_eq!(3, mv.len());
+//!
+//! // myvector1 still has an entry, so we can't remove it
+//! assert!(mv.destroy_vector("myvector1").is_err());
+//!
+//! // Split the final "myvector1" entry out of the group
+//! assert!(mv.unlink_entry("myvector1", 20).is_ok());
+//!
+//! // Remove the final "myvector1" entry.. since we unlinked it, it'll remove
+//! // alone
+//! assert_eq!(1, mv.remove_entries("myvector1", 20).unwrap().len());
+//!
+//! // Now there are just two elements left, both in "myvector2"
+//! assert_eq!(2, mv.len());
+//!
+//! // Now we can remove myvector1, since it's empty
+//! assert_eq!(100, mv.destroy_vector("myvector1").unwrap());
+//! ```
+//!
+//! # Serialize / deserialize
+//!
+//! When installed with the 'serialize' feature:
+//!
+//! ```toml
+//! multi_vector = { version = "~0.0.0", features = ["serialize"] }
+//! ```
+//!
+//! Serialization support using [serde](https://serde.rs/) is enabled. The
+//! `MultiVector` can be serialized with any of the serializers that Serde
+//! supports, such as [ron](https://github.com/ron-rs/ron):
+//!
+//! ```ignore
+//! use multi_vector::MultiVector;
+//!
+//! // Assumes "serialize" feature is enabled: `multi_vector = { features = ["serialize"] }`
+//! let mut mv: MultiVector<String> = MultiVector::new();
+//! mv.create_buffer("buf", 100);
+//! mv.insert_entries(vec![
+//!     ("buf", String::from("a"),  0, 10),
+//!     ("buf", String::from("B"), 10, 10),
+//! ]);
+//!
+//! // Serialize
+//! let serialized = ron::ser::to_string(&mv).unwrap();
+//!
+//! // Deserialize
+//! let mv: MultiVector<String> = ron::de::from_str(&serialized).unwrap();
+//!
+//! assert_eq!(2, mv.len());
+//! ```
+
 use bumpy_vector::{BumpyVector, BumpyEntry};
 use simple_error::{SimpleResult, bail};
 use std::collections::HashMap;
@@ -12,15 +127,12 @@ use serde::{Serialize, Deserialize};
 /// This is automatically created by `MultiVector` when inserting elements.
 /// It is, however, returned in several places. It helpfully encodes the vector
 /// into itself.
-///
-/// I left `linked` private, because I don't particularly like it existing. I'm
-/// hoping to remove it eventually.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct MultiEntry<T> {
     pub vector: String,
     pub data: T,
-    linked: Vec<(String, usize)>,
+    pub linked: Vec<(String, usize)>,
 }
 
 /// The primary struct that powers the MultiVector.
@@ -54,6 +166,7 @@ where
     /// a descriptive error message if it can't be created.
     ///
     /// # Example
+    ///
     /// ```
     /// use multi_vector::MultiVector;
     ///
@@ -95,6 +208,7 @@ where
     /// error message.
     ///
     /// # Example
+    ///
     /// ```
     /// use multi_vector::MultiVector;
     ///
@@ -109,7 +223,7 @@ where
     /// mv.create_vector("myvector", 100).unwrap();
     ///
     /// // Populate it
-    /// mv.insert_entry("myvector", (111,  0, 10).into()).unwrap();
+    /// mv.insert_entry("myvector", 111,  0, 10).unwrap();
     ///
     /// // Fail to remove it
     /// assert!(mv.destroy_vector("myvector").is_err());
@@ -147,27 +261,60 @@ where
     /// Insert a grouped set of entries into the `MultiVector`.
     ///
     /// The `entries` argument is a vector of tuples, where the first element
-    /// is the vector name and the second is an entry.
+    /// is the vector name and the second and onwards effectively describes a
+    /// `BumpyEntry` - `(data, index, size)`.
     ///
-    /// The entry will be re-wrapped in a BumpyEntry<MultiEntry<T>>
+    /// Entries inserted together are "linked", which means when one is removed,
+    /// they are all removed (unless you call `unlink()` on one of them).
+    ///
+    /// Either all entries are added, or no entries are added; this cannot
+    /// leave the vector in a half-way state.
     ///
     /// # Return
     ///
+    /// Returns `Ok(())` if the entries were successfully inserted. Returns a
+    /// descriptive error otherwise.
     ///
     /// # Example
+    ///
     /// ```
+    /// use multi_vector::MultiVector;
+    ///
+    /// // Create an instance that stores u32 values
+    /// let mut mv: MultiVector<u32> = MultiVector::new();
+    ///
+    /// // Create a vector of size 1000
+    /// mv.create_vector("myvector", 1000).unwrap();
+    ///
+    /// // Verify there are no entries
+    /// assert_eq!(0, mv.len());
+    ///
+    /// // Populate it
+    /// mv.insert_entries(vec![
+    ///     ("myvector", 111,  0, 10),
+    ///     ("myvector", 222, 10, 10),
+    /// ]);
+    ///
+    /// // Now there are two entries
+    /// assert_eq!(2, mv.len());
+    ///
+    /// // Remove one entry
+    /// mv.remove_entries("myvector", 5).unwrap();
+    ///
+    /// // Prove it removes both
+    /// assert_eq!(0, mv.len());
     /// ```
-    pub fn insert_entries(&mut self, entries: Vec<(&str, BumpyEntry<T>)>) -> SimpleResult<()> {
+    pub fn insert_entries(&mut self, entries: Vec<(&str, T, usize, usize)>) -> SimpleResult<()> {
         // Get the set of references that each entry will store - the vector and
         // location of reach
-        let references: Vec<(String, usize)> = entries.iter().map(|(vector, entry)| {
-            (String::from(*vector), entry.index)
+        let references: Vec<(String, usize)> = entries.iter().map(|(vector, _, index, _)| {
+            (String::from(*vector), *index)
         }).collect();
 
         // We need a way to back out only entries that we've added - handle that
         let mut backtrack: Vec<(&str, usize)> = Vec::new();
 
-        for (vector, entry) in entries {
+        for (vector, data, index, size) in entries {
             // Try and get a handle to the vector
             let v = match self.vectors.get_mut(vector) {
                 Some(v) => v,
@@ -178,18 +325,15 @@ where
                 }
             };
 
-            // Grab a copy of the index, since we'll need to save it later
-            let index = entry.index;
-
             // Unwrap the BumpyEntry and make a new one with a MultiEntry instead
             let entry = BumpyEntry {
                 entry: MultiEntry {
                     vector: String::from(vector),
                     linked: references.clone(),
-                    data: entry.entry,
+                    data: data,
                 },
-                index: entry.index,
-                size: entry.size,
+                index: index,
+                size: size,
             };
 
             // Try and insert it into the BumpyVector
@@ -209,17 +353,53 @@ where
         Ok(())
     }
 
-    pub fn insert_entry(&mut self, vector: &str, entry: BumpyEntry<T>) -> SimpleResult<()> {
-        self.insert_entries(vec![(vector, entry)])
+    /// Insert a single entry, unlinked to others.
+    ///
+    /// This is a simple wrapper for `insert_entries()`.
+    pub fn insert_entry(&mut self, vector: &str, data: T, index: usize, size: usize) -> SimpleResult<()> {
+        self.insert_entries(vec![(vector, data, index, size)])
     }
 
+    /// Unlink an entry from its group of entries.
     ///
+    /// This will break the connection between an entry and its group.
     ///
     /// # Return
     ///
+    /// Returns `Ok(())` on success, or `Err()` with a descriptive error
+    /// message on failure.
     ///
     /// # Example
+    ///
     /// ```
+    /// use multi_vector::MultiVector;
+    ///
+    /// // Create an instance that stores u32 values
+    /// let mut mv: MultiVector<u32> = MultiVector::new();
+    ///
+    /// // Create a vector of size 1000
+    /// mv.create_vector("myvector", 1000).unwrap();
+    ///
+    /// // Verify there are no entries
+    /// assert_eq!(0, mv.len());
+    ///
+    /// // Populate it
+    /// mv.insert_entries(vec![
+    ///     ("myvector", 111,  0, 10),
+    ///     ("myvector", 222, 10, 10),
+    /// ]);
+    ///
+    /// // Now there are two entries
+    /// assert_eq!(2, mv.len());
+    ///
+    /// // Unlink the entries
+    /// mv.unlink_entry("myvector", 5);
+    ///
+    /// // Remove one entry
+    /// mv.remove_entries("myvector", 5).unwrap();
+    ///
+    /// // Prove it only removed one
+    /// assert_eq!(1, mv.len());
     /// ```
     pub fn unlink_entry(&mut self, vector: &str, index: usize) -> SimpleResult<()> {
         // This will be a NEW vector of references
@@ -252,30 +432,65 @@ where
         Ok(())
     }
 
-    ///
+    /// Get a single entry at the requested index.
     ///
     /// # Return
     ///
+    /// On success, returns a reference to a `BumpyEntry` that wraps the data
+    /// in a `MultiEntry`. I decided to return `MultiEntry` to give easier
+    /// access to the `vector` and `references` information.
+    ///
+    /// If no element exists there, return `None`.
     ///
     /// # Example
+    ///
     /// ```
     /// ```
     pub fn get_entry(&self, vector: &str, index: usize) -> Option<&BumpyEntry<MultiEntry<T>>> {
-        let v = self.vectors.get(vector)?;
-
-        v.get(index)
+        self.vectors.get(vector)?.get(index)
     }
 
-    ///
+    /// Get the group of entries, starting at the requested one.
     ///
     /// # Return
     ///
+    /// If the entry exists, return the set of entries that were inserted
+    /// together, in the same order in which they were inserted.
+    ///
+    /// Each vector element is returned as `Some(element)`. This is to handle
+    /// the unlikely case that a referenced element has disappeared at some
+    /// point. That shouldn't be possible, but we need to handle it somehow
+    /// (the most obvious place is in deserialization).
+    ///
+    /// If the original vector or element doesn't exist, return `Err` with
+    /// a descriptive error message.
     ///
     /// # Example
+    ///
     /// ```
+    /// use multi_vector::MultiVector;
+    ///
+    /// // Create an instance that stores u32 values
+    /// let mut mv: MultiVector<u32> = MultiVector::new();
+    ///
+    /// // Create a vector of size 1000
+    /// mv.create_vector("myvector", 1000).unwrap();
+    ///
+    /// // Verify there are no entries
+    /// assert_eq!(0, mv.len());
+    ///
+    /// // Populate it
+    /// mv.insert_entries(vec![
+    ///     ("myvector", 111,  0, 10),
+    ///     ("myvector", 222, 10, 10),
+    /// ]);
+    ///
+    /// // Prove that we get both elements back
+    /// assert_eq!(2, mv.get_entries("myvector", 15).unwrap().len());
+    ///
+    /// // Verify that they are still in the `MultiVector`
+    /// assert_eq!(2, mv.len());
     /// ```
-    // This guarantees that the response vector will have entries in the same
-    // order as they were inserted. In case that matters.
     pub fn get_entries(&self, vector: &str, index: usize) -> SimpleResult<Vec<Option<&BumpyEntry<MultiEntry<T>>>>> {
         let linked = match self.vectors.get(vector) {
             Some(v) => match v.get(index) {
@@ -293,13 +508,46 @@ where
         Ok(results)
     }
 
-    ///
+    /// Remove and return all entries in a group.
     ///
     /// # Return
     ///
+    /// If the entry exists, return the set of entries that were inserted
+    /// together, in the same order in which they were inserted.
+    ///
+    /// Each vector element is returned as `Some(element)`. This is to handle
+    /// the unlikely case that a referenced element has disappeared at some
+    /// point. That shouldn't be possible, but we need to handle it somehow
+    /// (the most obvious place is in deserialization).
+    ///
+    /// If the original vector or element doesn't exist, return `Err` with
+    /// a descriptive error message.
     ///
     /// # Example
+    ///
     /// ```
+    /// use multi_vector::MultiVector;
+    ///
+    /// // Create an instance that stores u32 values
+    /// let mut mv: MultiVector<u32> = MultiVector::new();
+    ///
+    /// // Create a vector of size 1000
+    /// mv.create_vector("myvector", 1000).unwrap();
+    ///
+    /// // Verify there are no entries
+    /// assert_eq!(0, mv.len());
+    ///
+    /// // Populate it
+    /// mv.insert_entries(vec![
+    ///     ("myvector", 111,  0, 10),
+    ///     ("myvector", 222, 10, 10),
+    /// ]);
+    ///
+    /// // Prove that we get both elements back
+    /// assert_eq!(2, mv.remove_entries("myvector", 15).unwrap().len());
+    ///
+    /// // Verify that they are gone
+    /// assert_eq!(0, mv.len());
     /// ```
     pub fn remove_entries(&mut self, vector: &str, index: usize) -> SimpleResult<Vec<Option<BumpyEntry<MultiEntry<T>>>>> {
         let linked = match self.vectors.get(vector) {
@@ -325,71 +573,31 @@ where
         Ok(results)
     }
 
-    ///
-    ///
-    /// # Return
-    ///
-    ///
-    /// # Example
-    /// ```
-    /// ```
-    // Get the number of vectors
+    /// Returns the number of vectors in the `MultiVector`.
     pub fn vector_count(&self) -> usize {
         self.vectors.len()
     }
 
-    ///
-    ///
-    /// # Return
-    ///
-    ///
-    /// # Example
-    /// ```
-    /// ```
-    // Is the vector a member of the MultiVector?
+    /// Returns `true` if a vector with the given name exists, false otherwise.
     pub fn vector_exists(&self, vector: &str) -> bool {
         self.vectors.contains_key(vector)
     }
 
-    ///
-    ///
-    /// # Return
-    ///
-    ///
-    /// # Example
-    /// ```
-    /// ```
-    // Get the length of a vector, if it exists
+    /// Returns the number of elements in the given vector; `None` otherwise.
     pub fn len_vector(&self, vector: &str) -> Option<usize> {
         let v = self.vectors.get(vector)?;
 
         Some(v.len())
     }
 
-    ///
-    ///
-    /// # Return
-    ///
-    ///
-    /// # Example
-    /// ```
-    /// ```
-    // Get the length of a vector, if it exists
+    /// Returns the max size of the named Vector; `None` if not found.
     pub fn max_size_vector(&self, vector: &str) -> Option<usize> {
         let v = self.vectors.get(vector)?;
 
         Some(v.max_size())
     }
 
-    ///
-    ///
-    /// # Return
-    ///
-    ///
-    /// # Example
-    /// ```
-    /// ```
-    // Get the length of ALL vectors
+    /// Returns the total number of entries across all vectors.
     pub fn len(&self) -> usize {
         self.vectors.iter().map(|(_, v)| v.len()).sum()
     }
@@ -444,8 +652,8 @@ mod tests {
 
         // Populate "name2"
         mv.insert_entries(vec![
-            ("name2", (123,  10,  10).into()),
-            ("name2", (123,  20,  10).into()),
+            ("name2", 123,  10,  10),
+            ("name2", 123,  20,  10),
         ])?;
 
         // "name" is still empty, it can be destroyed
@@ -495,14 +703,14 @@ mod tests {
         mv.create_vector("vector1", 100)?;
         mv.create_vector("vector2", 200)?;
 
-        let entries: Vec<(&str, BumpyEntry<u32>)> = vec![
+        let entries: Vec<(&str, u32, usize, usize)> = vec![
             // (vector_name, ( data, index, length ) )
-            ("vector1", (111,  0,  1).into()),
-            ("vector1", (222,  5,  5).into()),
-            ("vector1", (333, 10, 10).into()),
+            ("vector1", 111,  0,  1),
+            ("vector1", 222,  5,  5),
+            ("vector1", 333, 10, 10),
 
-            ("vector2", (444, 0, 100).into()),
-            ("vector2", (555, 100, 100).into()),
+            ("vector2", 444, 0, 100),
+            ("vector2", 555, 100, 100),
         ];
 
         // They are empty before
@@ -516,9 +724,9 @@ mod tests {
         assert_eq!(3, mv.len_vector("vector1").unwrap());
         assert_eq!(2, mv.len_vector("vector2").unwrap());
 
-        let more_entries: Vec<(&str, BumpyEntry<u32>)> = vec![
+        let more_entries: Vec<(&str, u32, usize, usize)> = vec![
             // (vector_name, ( data, index, length ) )
-            ("vector1", (666, 20, 1).into()),
+            ("vector1", 667, 20, 1),
         ];
 
         // Insert more entries
@@ -536,7 +744,7 @@ mod tests {
         mv.create_vector("vector1", 100)?;
 
         // Create no entries
-        let entries: Vec<(&str, BumpyEntry<u32>)> = vec![];
+        let entries: Vec<(&str, u32, usize, usize)> = vec![];
 
         // Insert them entries
         mv.insert_entries(entries)?;
@@ -556,16 +764,16 @@ mod tests {
         // Add a couple real entries so we can make sure we don't overwrite
         // or remove them
         mv.insert_entries(vec![
-            ("vector1", (123,  0,  10).into()),
-            ("vector1", (123, 10,  10).into()),
-            ("vector1", (123, 20,  10).into()),
-            ("vector2", (123,  0,  10).into()),
+            ("vector1", 123,  0,  10),
+            ("vector1", 123, 10,  10),
+            ("vector1", 123, 20,  10),
+            ("vector2", 123,  0,  10),
         ])?;
         assert_eq!(4, mv.len());
 
         // Invalid vector
         assert!(mv.insert_entries(vec![
-            ("fakevector", (123,  0,  1).into()),
+            ("fakevector", 123,  0,  1),
         ]).is_err());
 
         // No entry should be added or removed
@@ -573,7 +781,7 @@ mod tests {
 
         // Overlapping
         assert!(mv.insert_entries(vec![
-            ("vector1", (123,  0,  10).into()),
+            ("vector1", 123,  0,  10),
         ]).is_err());
 
         // No entry should be added or removed
@@ -581,7 +789,7 @@ mod tests {
 
         // Off the end
         assert!(mv.insert_entries(vec![
-            ("vector1", (123,  0,  1000).into()),
+            ("vector1", 123,  0,  1000),
         ]).is_err());
 
         // No entry should be added or removed
@@ -589,7 +797,7 @@ mod tests {
 
         // Zero length
         assert!(mv.insert_entries(vec![
-            ("vector1", (123,  0,  0).into()),
+            ("vector1", 123,  0,  0),
         ]).is_err());
 
         // No entry should be added or removed
@@ -597,10 +805,10 @@ mod tests {
 
         // Overlapping each other
         assert!(mv.insert_entries(vec![
-            ("vector1", (123,  10,  10).into()),
-            ("vector1", (123,  20,  10).into()),
-            ("vector1", (123,  15,   1).into()),
-            ("vector1", (123,  50,  10).into()),
+            ("vector1", 123,  10,  10),
+            ("vector1", 123,  20,  10),
+            ("vector1", 123,  15,   1),
+            ("vector1", 123,  50,  10),
         ]).is_err());
 
         // No entry should be added or removed
@@ -609,10 +817,10 @@ mod tests {
         // Multiple entries that overlap - this ensures that we don't
         // accidentally remove things from the vector that we shouldn't
         assert!(mv.insert_entries(vec![
-            ("vector1", (123,  0,  10).into()),
-            ("vector1", (123, 10,  10).into()),
-            ("vector1", (123, 20,  10).into()),
-            ("vector2", (123,  0,  10).into()),
+            ("vector1", 123,  0,  10),
+            ("vector1", 123, 10,  10),
+            ("vector1", 123, 20,  10),
+            ("vector2", 123,  0,  10),
         ]).is_err());
 
         // No entry should be added or removed
@@ -630,14 +838,14 @@ mod tests {
         // One group of entries
         mv.insert_entries(vec![
             // (vector_name, ( data, index, length ) )
-            ("vector1", (111, 0,   1).into()),
-            ("vector1", (222, 5,   5).into()),
-            ("vector2", (444, 0, 100).into()),
+            ("vector1", 111, 0,   1),
+            ("vector1", 222, 5,   5),
+            ("vector2", 444, 0, 100),
         ])?;
 
         mv.insert_entries(vec![
-            ("vector1", (333, 10, 10).into()),
-            ("vector2", (555, 100, 100).into()),
+            ("vector1", 333, 10, 10),
+            ("vector2", 555, 100, 100),
         ])?;
 
         // Verify that all entries are there
@@ -665,14 +873,14 @@ mod tests {
         // One group of entries
         mv.insert_entries(vec![
             // (vector_name, ( data, index, length ) )
-            ("vector1", (111, 0,   1).into()),
-            ("vector1", (222, 5,   5).into()),
-            ("vector2", (444, 0, 100).into()),
+            ("vector1", 111, 0,   1),
+            ("vector1", 222, 5,   5),
+            ("vector2", 444, 0, 100),
         ])?;
 
         mv.insert_entries(vec![
-            ("vector2", (555, 100, 100).into()),
-            ("vector1", (333, 10, 10).into()),
+            ("vector2", 555, 100, 100),
+            ("vector1", 333, 10, 10),
         ])?;
 
         // Verify that all entries are there
@@ -731,14 +939,14 @@ mod tests {
         // One group of entries
         mv.insert_entries(vec![
             // (vector_name, ( data, index, length ) )
-            ("vector1", (111, 0,   1).into()),
-            ("vector1", (222, 5,   5).into()),
-            ("vector2", (444, 0, 100).into()),
+            ("vector1", 111, 0,   1),
+            ("vector1", 222, 5,   5),
+            ("vector2", 444, 0, 100),
         ])?;
 
         mv.insert_entries(vec![
-            ("vector2", (555, 100, 100).into()),
-            ("vector1", (333, 10, 10).into()),
+            ("vector2", 555, 100, 100),
+            ("vector1", 333,  10,  10),
         ])?;
 
         // Verify that all entries are there
@@ -790,14 +998,14 @@ mod tests {
         // One group of entries
         mv.insert_entries(vec![
             // (vector_name, ( data, index, length ) )
-            ("vector1", (111, 0,   1).into()),
-            ("vector1", (222, 5,   5).into()),
-            ("vector2", (444, 0, 100).into()), // Will be unlinked for test
+            ("vector1", 111, 0,   1),
+            ("vector1", 222, 5,   5),
+            ("vector2", 444, 0, 100), // Will be unlinked for test
         ])?;
 
         mv.insert_entries(vec![
-            ("vector2", (555, 100, 100).into()), // Will be unlinked for test
-            ("vector1", (333, 10, 10).into()),
+            ("vector2", 555, 100, 100), // Will be unlinked for test
+            ("vector1", 333, 10, 10),
         ])?;
 
         // Verify that all entries are there
