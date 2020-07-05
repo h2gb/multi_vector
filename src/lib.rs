@@ -244,6 +244,18 @@ where
         }
     }
 
+    /// Forceably remove and return a vector, even if it's not empty.
+    ///
+    /// This is much more complex, and not recommended to use unless it's
+    /// absolutely necessary. I'd suggest wiping undo history if this is used.
+    ///
+    /// Additionally note that this might cause hanging references, where
+    /// members of a group of entries goes away. This library will handle that
+    /// as well as it can, but it may cause other problems.
+    pub fn force_destroy_vector(&mut self, vector: &str) -> Option<BumpyVector<MultiEntry<T>>> {
+        self.vectors.remove(vector)
+    }
+
     /// Remove entries without properly unlinking them.
     ///
     /// This is for internal use only.
@@ -306,14 +318,19 @@ where
     /// ```
     pub fn insert_entries(&mut self, entries: Vec<(&str, T, usize, usize)>) -> SimpleResult<()> {
         // Get the set of references that each entry will store - the vector and
-        // location of reach
+        // location of each other. Copying the references over and over isn't
+        // the best way to implement this, probably, but also isn't entirely
+        // unreasonable.
         let references: Vec<(String, usize)> = entries.iter().map(|(vector, _, index, _)| {
             (String::from(*vector), *index)
         }).collect();
 
-        // We need a way to back out only entries that we've added - handle that
+        // We need a way to back out only entries that we've added; we can't
+        // just use `references` because that'll include things we haven't
+        // inserted yet (which is potentially other valid entries)
         let mut backtrack: Vec<(&str, usize)> = Vec::new();
 
+        // Loop through each entry we're adding
         for (vector, data, index, size) in entries {
             // Try and get a handle to the vector
             let v = match self.vectors.get_mut(vector) {
@@ -329,6 +346,8 @@ where
             let entry = BumpyEntry {
                 entry: MultiEntry {
                     vector: String::from(vector),
+                    // I don't love cloning references, but we'd need to
+                    // somehow redesign the linking otherwise.
                     linked: references.clone(),
                     data: data,
                 },
@@ -627,7 +646,6 @@ where
         result.into_iter()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
