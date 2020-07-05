@@ -139,16 +139,12 @@ pub struct MultiEntry<T> {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct MultiVector<T>
-where
-    T: Clone
 {
     // A map of bumpy_vectors, indexed by name
     vectors: HashMap<String, BumpyVector<MultiEntry<T>>>,
 }
 
 impl<'a, T> MultiVector<T>
-where
-    T: Clone
 {
 
     /// Create a new - empty - instance.
@@ -627,10 +623,7 @@ where
 /// Naively iterate across all entries, move them into a `Vec<_>`, and convert
 /// that vector into an iterator.
 ///
-impl<'a, T> IntoIterator for &'a MultiVector<T>
-where
-    T: Debug + Clone
-{
+impl<'a, T> IntoIterator for &'a MultiVector<T> {
     type Item = &'a BumpyEntry<MultiEntry<T>>;
     type IntoIter = std::vec::IntoIter<&'a BumpyEntry<MultiEntry<T>>>;
 
