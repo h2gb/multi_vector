@@ -1062,4 +1062,25 @@ mod tests {
         assert_eq!(0, mv.len());
     }
 
+    #[test]
+    fn test_clone() {
+        let mut mv: MultiVector<String> = MultiVector::new();
+        mv.create_vector("myvector", 20).unwrap();
+        mv.insert_entries(vec![
+            ("myvector", String::from("a"),  0, 10),
+            ("myvector", String::from("b"), 10, 10),
+        ]).unwrap();
+        assert_eq!(2, mv.len());
+
+        // Clone
+        let mut mv2: MultiVector<String> = mv.clone();
+        assert_eq!(2, mv2.len());
+
+        // Make sure remove still works
+        assert_eq!(2, mv2.remove_entries("myvector", 0).unwrap().len());
+        assert_eq!(0, mv2.len());
+
+        // Make sure the original is untouched
+        assert_eq!(2, mv.len());
+    }
 }
