@@ -603,6 +603,32 @@ where
     }
 }
 
+/// Convert into an iterator.
+///
+/// Naively iterate across all entries, move them into a `Vec<_>`, and convert
+/// that vector into an iterator.
+///
+impl<'a, T> IntoIterator for &'a MultiVector<T>
+where
+    T: Debug + Clone
+{
+    type Item = &'a BumpyEntry<MultiEntry<T>>;
+    type IntoIter = std::vec::IntoIter<&'a BumpyEntry<MultiEntry<T>>>;
+
+    fn into_iter(self) -> std::vec::IntoIter<&'a BumpyEntry<MultiEntry<T>>> {
+        let mut result: Vec<&'a BumpyEntry<MultiEntry<T>>> = Vec::new();
+
+        for (_, v) in self.vectors.iter() {
+            for e in v.into_iter() {
+                result.push(e);
+            }
+        }
+
+        result.into_iter()
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1082,5 +1108,43 @@ mod tests {
 
         // Make sure the original is untouched
         assert_eq!(2, mv.len());
+    }
+
+    #[test]
+    fn test_iterator() -> SimpleResult<()> {
+        let mut mv: MultiVector<u32> = MultiVector::new();
+        mv.create_vector("vector1", 100)?;
+        mv.create_vector("vector2", 200)?;
+
+        let entries: Vec<(&str, u32, usize, usize)> = vec![
+            // (vector_name, ( data, index, length ) )
+            ("vector1", 111,  0,  1),
+            ("vector1", 222,  5,  5),
+            ("vector1", 333, 10, 10),
+
+            ("vector2", 444, 0, 100),
+            ("vector2", 555, 100, 100),
+        ];
+
+        // Insert the entries
+        mv.insert_entries(entries)?;
+
+        let mut i = mv.into_iter();
+        assert!(i.next().is_some());
+        assert!(i.next().is_some());
+        assert!(i.next().is_some());
+        assert!(i.next().is_some());
+        assert!(i.next().is_some());
+        assert!(i.next().is_none());
+
+        let mut i2 = mv.into_iter();
+        assert!(i2.next().is_some());
+        assert!(i2.next().is_some());
+        assert!(i2.next().is_some());
+        assert!(i2.next().is_some());
+        assert!(i2.next().is_some());
+        assert!(i2.next().is_none());
+
+        Ok(())
     }
 }

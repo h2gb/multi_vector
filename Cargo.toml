@@ -18,7 +18,9 @@ serialize = ["serde", "ron", "bumpy_vector/serialize"]
 serde = { version = "~1.0.110", optional = true }
 ron   = { version = "~0.5.1",   optional = true }
 simple-error = "~0.2.1"
-bumpy_vector = { path = "/home/ron/projects/bumpy_vector" }
+
+#bumpy_vector = { path = "/home/ron/projects/bumpy_vector" }
+bumpy_vector = { git = "https://github.com/h2gb/bumpy_vector", branch = "master" }
 
 [dev-dependencies]
 pretty_assertions = "~0.6.1"
