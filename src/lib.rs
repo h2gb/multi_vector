@@ -140,7 +140,7 @@ pub struct MultiEntry<T> {
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct MultiVector<T>
 where
-    T: Clone + Debug
+    T: Clone
 {
     // A map of bumpy_vectors, indexed by name
     vectors: HashMap<String, BumpyVector<MultiEntry<T>>>,
@@ -148,7 +148,7 @@ where
 
 impl<'a, T> MultiVector<T>
 where
-    T: Clone + Debug
+    T: Clone
 {
 
     /// Create a new - empty - instance.
