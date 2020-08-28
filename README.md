@@ -30,7 +30,7 @@ added together, as a "group", are linked, and will be removed together.
 use multi_vector::MultiVector;
 
 // Create an instance that stores Strings
-let mut mv: MultiVector<u32> = MultiVector::new();
+let mut mv: MultiVector<&str, u32> = MultiVector::new();
 
 // Create a pair of vectors, one that's 100 elements and one that's 200
 mv.create_vector("myvector1", 100).unwrap();
@@ -44,8 +44,8 @@ assert_eq!(0, mv.len());
 
 // Populate it with one group
 mv.insert_entries(vec![
-    ("myvector1", 111,  0, 10),
-    ("myvector1", 222, 10, 10),
+    (&"myvector1", 111,  0, 10),
+    (&"myvector1", 222, 10, 10),
 ]);
 
 // Now there are two entries
@@ -53,9 +53,9 @@ assert_eq!(2, mv.len());
 
 // Populate with some more values
 mv.insert_entries(vec![
-    ("myvector1", 111,  20, 10),
-    ("myvector2", 222,  0,  10),
-    ("myvector2", 222,  10, 10),
+    (&"myvector1", 111,  20, 10),
+    (&"myvector2", 222,  0,  10),
+    (&"myvector2", 222,  10, 10),
 ]);
 
 // Now there are five entries!
@@ -63,24 +63,24 @@ assert_eq!(5, mv.len());
 
 // Remove en entry from the first group, note that both entries get
 // removed
-assert_eq!(2, mv.remove_entries("myvector1", 15).unwrap().len());
+assert_eq!(2, mv.remove_entries(&"myvector1", 15).unwrap().len());
 assert_eq!(3, mv.len());
 
 // myvector1 still has an entry, so we can't remove it
-assert!(mv.destroy_vector("myvector1").is_err());
+assert!(mv.destroy_vector(&"myvector1").is_err());
 
 // Split the final "myvector1" entry out of the group
-assert!(mv.unlink_entry("myvector1", 20).is_ok());
+assert!(mv.unlink_entry(&"myvector1", 20).is_ok());
 
 // Remove the final "myvector1" entry.. since we unlinked it, it'll remove
 // alone
-assert_eq!(1, mv.remove_entries("myvector1", 20).unwrap().len());
+assert_eq!(1, mv.remove_entries(&"myvector1", 20).unwrap().len());
 
 // Now there are just two elements left, both in "myvector2"
 assert_eq!(2, mv.len());
 
 // Now we can remove myvector1, since it's empty
-assert_eq!(100, mv.destroy_vector("myvector1").unwrap());
+assert_eq!(100, mv.destroy_vector(&"myvector1").unwrap());
 ```
 
 ## Serialize / deserialize
@@ -99,11 +99,11 @@ supports, such as [ron](https://github.com/ron-rs/ron):
 use multi_vector::MultiVector;
 
 // Assumes "serialize" feature is enabled: `multi_vector = { features = ["serialize"] }`
-let mut mv: MultiVector<String> = MultiVector::new();
+let mut mv: MultiVector<&str, String> = MultiVector::new();
 mv.create_buffer("buf", 100);
 mv.insert_entries(vec![
-    ("buf", String::from("a"),  0, 10),
-    ("buf", String::from("B"), 10, 10),
+    (&"buf", String::from("a"),  0, 10),
+    (&"buf", String::from("B"), 10, 10),
 ]);
 
 // Serialize
