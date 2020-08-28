@@ -10,4 +10,4 @@ Changes:
 # Version 0.0.2
 
 Changes:
-* Key type is now a generic type - no longer required to be `&str`
+* Key type is now a generic type - no longer required to be `&str` [#2]
