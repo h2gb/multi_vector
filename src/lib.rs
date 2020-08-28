@@ -151,7 +151,6 @@ where
     vectors: HashMap<N, BumpyVector<MultiEntry<N, T>>>,
 }
 
-/// XXX: Look at all isntances of .clone() and see what I can get rid of ASAP
 impl<'a, N, T> MultiVector<N, T>
 where
     N: Hash + Eq + Debug + Clone,
@@ -328,6 +327,8 @@ where
         // the best way to implement this, probably, but also isn't entirely
         // unreasonable.
         let references: Vec<(N, usize)> = entries.iter().map(|(vector, _, index, _)| {
+            // Need to copy into each reference (we could probably use a Rc<>
+            // or something if this becomes a bottleneck)
             ((*vector).clone(), *index)
         }).collect();
 
@@ -351,7 +352,10 @@ where
             // Unwrap the BumpyEntry and make a new one with a MultiEntry instead
             let entry = BumpyEntry {
                 entry: MultiEntry {
+                    // We're forced to clone this because we reference `vector`
+                    // again when adding to `backtrack`.
                     vector: vector.clone(),
+
                     // I don't love cloning references, but we'd need to
                     // somehow redesign the linking otherwise.
                     linked: references.clone(),
@@ -429,12 +433,18 @@ where
     pub fn unlink_entry(&mut self, vector: &N, index: usize) -> SimpleResult<()> {
         // This will be a NEW vector of references
         let new_linked: Vec<(N, usize)> = match self.vectors.get_mut(vector) {
+            // The vector they requested does exist
             Some(v) => match v.get_mut(index) {
+                // The index in the vector does have an entry
                 Some(e) => {
                     // Swap out the linked entry for an empty one
-                    let original_links = mem::replace(&mut e.entry.linked, vec![(vector.clone(), e.index)]);
+                    let original_links = mem::replace(
+                        &mut e.entry.linked,      // Replace the vectors in the unlinked entry...
+                        vec![((*vector).clone(), e.index)]  // ...with a reference to just itself
+                    );
 
-                    // Return the remaining links, with the unlinked one removed
+                    // Take the list of original links, and turn it into a list
+                    // minus the removed one
                     original_links.into_iter().filter(|(v, i)| {
                         // Reminder: we can't use `*i == index` here, since
                         // `index` isn't necessarily the start.
@@ -451,6 +461,8 @@ where
             let v = self.vectors.get_mut(vector).unwrap();
             let e = v.get_mut(*index).unwrap();
 
+            // Clone is required for each link, for the same reason it is in
+            // `insert_entries()`
             e.entry.linked = new_linked.clone();
         }
 
