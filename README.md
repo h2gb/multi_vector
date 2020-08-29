@@ -26,11 +26,24 @@ created relationship with each other, and we want to track that.
 Instantiate, add vectors, and add elements to the vectors. All elements
 added together, as a "group", are linked, and will be removed together.
 
+I decided to force all data inserted to implement AutoBumpyEntry. That
+basically means it knows its own index / size, which simplifies insertion
+a great deal.
+
+## Example
+
 ```rust
 use multi_vector::MultiVector;
+use bumpy_vector::AutoBumpyEntry;
+
+struct MyEntryType { data: u32, index: usize, size: usize }
+impl AutoBumpyEntry for MyEntryType {
+    fn index(&self) -> usize { self.index }
+    fn size(&self) -> usize { self.size }
+}
 
 // Create an instance that stores Strings
-let mut mv: MultiVector<&str, u32> = MultiVector::new();
+let mut mv: MultiVector<&str, MyEntryType> = MultiVector::new();
 
 // Create a pair of vectors, one that's 100 elements and one that's 200
 mv.create_vector("myvector1", 100).unwrap();
@@ -44,8 +57,8 @@ assert_eq!(0, mv.len());
 
 // Populate it with one group
 mv.insert_entries(vec![
-    (&"myvector1", 111,  0, 10),
-    (&"myvector1", 222, 10, 10),
+    (&"myvector1", MyEntryType { data: 111, index:  0, size: 10 }),
+    (&"myvector1", MyEntryType { data: 222, index: 10, size: 10 }),
 ]);
 
 // Now there are two entries
@@ -53,9 +66,9 @@ assert_eq!(2, mv.len());
 
 // Populate with some more values
 mv.insert_entries(vec![
-    (&"myvector1", 111,  20, 10),
-    (&"myvector2", 222,  0,  10),
-    (&"myvector2", 222,  10, 10),
+    (&"myvector1", MyEntryType { data: 111, index: 20, size: 10 }),
+    (&"myvector2", MyEntryType { data: 222, index: 0,  size: 10 }),
+    (&"myvector2", MyEntryType { data: 222, index: 10, size: 10 }),
 ]);
 
 // Now there are five entries!
