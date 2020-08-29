@@ -11,3 +11,4 @@ Changes:
 
 Changes:
 * Key type is now a generic type - no longer required to be `&str` [#2]
+* All entries must implement `BumpyVector::AutoBumpyEntry` [#3]
