@@ -33,8 +33,7 @@ a great deal.
 ## Example
 
 ```rust
-use multi_vector::MultiVector;
-use bumpy_vector::AutoBumpyEntry;
+use multi_vector::{MultiVector, AutoBumpyEntry};
 
 struct MyEntryType { data: u32, index: usize, size: usize }
 impl AutoBumpyEntry for MyEntryType {

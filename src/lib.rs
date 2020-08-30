@@ -31,8 +31,7 @@
 //! # Example
 //!
 //! ```
-//! use multi_vector::MultiVector;
-//! use bumpy_vector::AutoBumpyEntry;
+//! use multi_vector::{MultiVector, AutoBumpyEntry};
 //!
 //! struct MyEntryType { data: u32, index: usize, size: usize }
 //! impl AutoBumpyEntry for MyEntryType {
@@ -126,7 +125,9 @@
 //! assert_eq!(2, mv.len());
 //! ```
 
-use bumpy_vector::{BumpyVector, BumpyEntry, AutoBumpyEntry};
+pub use bumpy_vector::AutoBumpyEntry;
+
+use bumpy_vector::{BumpyVector, BumpyEntry};
 use simple_error::{SimpleResult, bail};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -203,8 +204,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use multi_vector::MultiVector;
-    /// use bumpy_vector::AutoBumpyEntry;
+    /// use multi_vector::{MultiVector, AutoBumpyEntry};
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
@@ -252,8 +252,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use multi_vector::MultiVector;
-    /// use bumpy_vector::AutoBumpyEntry;
+    /// use multi_vector::{MultiVector, AutoBumpyEntry};
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
@@ -339,8 +338,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use multi_vector::MultiVector;
-    /// use bumpy_vector::AutoBumpyEntry;
+    /// use multi_vector::{MultiVector, AutoBumpyEntry};
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
@@ -451,8 +449,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use multi_vector::MultiVector;
-    /// use bumpy_vector::AutoBumpyEntry;
+    /// use multi_vector::{MultiVector, AutoBumpyEntry};
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
@@ -557,8 +554,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use multi_vector::MultiVector;
-    /// use bumpy_vector::AutoBumpyEntry;
+    /// use multi_vector::{MultiVector, AutoBumpyEntry};
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
@@ -622,8 +618,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use multi_vector::MultiVector;
-    /// use bumpy_vector::AutoBumpyEntry;
+    /// use multi_vector::{MultiVector, AutoBumpyEntry};
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
