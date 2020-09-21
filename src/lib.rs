@@ -32,11 +32,11 @@
 //!
 //! ```
 //! use multi_vector::{MultiVector, AutoBumpyEntry};
+//! use std::ops::Range;
 //!
 //! struct MyEntryType { data: u32, index: usize, size: usize }
 //! impl AutoBumpyEntry for MyEntryType {
-//!     fn index(&self) -> usize { self.index }
-//!     fn size(&self) -> usize { self.size }
+//!     fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
 //! }
 //!
 //! // Create an instance that stores Strings
@@ -134,6 +134,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::hash::Hash;
 use std::clone::Clone;
+use std::ops::Range;
 
 #[cfg(feature = "serialize")]
 use serde::{Serialize, Deserialize};
@@ -160,12 +161,8 @@ where
     N: Hash + Eq + Debug + Clone,
     T: AutoBumpyEntry,
 {
-    fn index(&self) -> usize {
-        self.data.index()
-    }
-
-    fn size(&self) -> usize {
-        self.data.size()
+    fn range(&self) -> Range<usize> {
+        self.data.range()
     }
 }
 
@@ -205,11 +202,11 @@ where
     ///
     /// ```
     /// use multi_vector::{MultiVector, AutoBumpyEntry};
+    /// use std::ops::Range;
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
-    ///     fn index(&self) -> usize { self.index }
-    ///     fn size(&self) -> usize { self.size }
+    ///     fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
     /// }
     ///
     /// // Create an instance that stores u32 values
@@ -253,11 +250,11 @@ where
     ///
     /// ```
     /// use multi_vector::{MultiVector, AutoBumpyEntry};
+    /// use std::ops::Range;
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
-    ///     fn index(&self) -> usize { self.index }
-    ///     fn size(&self) -> usize { self.size }
+    ///     fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
     /// }
     ///
     /// // Create an instance that stores u32 values
@@ -339,11 +336,11 @@ where
     ///
     /// ```
     /// use multi_vector::{MultiVector, AutoBumpyEntry};
+    /// use std::ops::Range;
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
-    ///     fn index(&self) -> usize { self.index }
-    ///     fn size(&self) -> usize { self.size }
+    ///     fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
     /// }
     ///
     /// // Create an instance that stores u32 values
@@ -378,7 +375,7 @@ where
         let references: Vec<(N, usize)> = entries.iter().map(|(vector, entry)| {
             // Need to copy into each reference (we could probably use a Rc<>
             // or something if this becomes a bottleneck)
-            ((*vector).clone(), entry.index())
+            ((*vector).clone(), entry.range().start)
         }).collect();
 
         // We need a way to back out only entries that we've added; we can't
@@ -411,7 +408,7 @@ where
             };
 
             // Save the index for later
-            let index = entry.index();
+            let index = entry.range().start;
 
             // Try and insert it into the BumpyVector
             match v.insert_auto(entry) {
@@ -450,11 +447,11 @@ where
     ///
     /// ```
     /// use multi_vector::{MultiVector, AutoBumpyEntry};
+    /// use std::ops::Range;
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
-    ///     fn index(&self) -> usize { self.index }
-    ///     fn size(&self) -> usize { self.size }
+    ///     fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
     /// }
     ///
     /// // Create an instance that stores u32 values
@@ -494,7 +491,7 @@ where
                     // Swap out the linked entry for an empty one
                     let original_links = mem::replace(
                         &mut e.entry.linked,      // Replace the vectors in the unlinked entry...
-                        vec![((*vector).clone(), e.index)]  // ...with a reference to just itself
+                        vec![((*vector).clone(), e.range.start)]  // ...with a reference to just itself
                     );
 
                     // Take the list of original links, and turn it into a list
@@ -502,7 +499,7 @@ where
                     original_links.into_iter().filter(|(v, i)| {
                         // Reminder: we can't use `*i == index` here, since
                         // `index` isn't necessarily the start.
-                        !(v == vector && *i == e.index)
+                        !(v == vector && *i == e.range.start)
                     }).collect()
                 }
                 None => bail!("Couldn't find index {} in vector {:?}", index, vector),
@@ -555,11 +552,11 @@ where
     ///
     /// ```
     /// use multi_vector::{MultiVector, AutoBumpyEntry};
+    /// use std::ops::Range;
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
-    ///     fn index(&self) -> usize { self.index }
-    ///     fn size(&self) -> usize { self.size }
+    ///     fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
     /// }
     ///
     /// // Create an instance that stores u32 values
@@ -619,11 +616,11 @@ where
     ///
     /// ```
     /// use multi_vector::{MultiVector, AutoBumpyEntry};
+    /// use std::ops::Range;
     ///
     /// struct MyEntryType { data: u32, index: usize, size: usize }
     /// impl AutoBumpyEntry for MyEntryType {
-    ///     fn index(&self) -> usize { self.index }
-    ///     fn size(&self) -> usize { self.size }
+    ///     fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
     /// }
     ///
     /// // Create an instance that stores u32 values
@@ -744,12 +741,8 @@ mod tests {
     }
 
     impl AutoBumpyEntry for TestEntryType {
-        fn index(&self) -> usize {
-            return self.index;
-        }
-
-        fn size(&self) -> usize {
-            return self.size;
+        fn range(&self) -> Range<usize> {
+            self.index..(self.index + self.size)
         }
     }
 

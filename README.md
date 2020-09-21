@@ -34,11 +34,11 @@ a great deal.
 
 ```rust
 use multi_vector::{MultiVector, AutoBumpyEntry};
+use std::ops::Range;
 
 struct MyEntryType { data: u32, index: usize, size: usize }
 impl AutoBumpyEntry for MyEntryType {
-    fn index(&self) -> usize { self.index }
-    fn size(&self) -> usize { self.size }
+    fn range(&self) -> Range<usize> { self.index..(self.index + self.size) }
 }
 
 // Create an instance that stores Strings
