@@ -12,3 +12,4 @@ Changes:
 Changes:
 * Key type is now a generic type - no longer required to be `&str` [#2]
 * All entries must implement `BumpyVector::AutoBumpyEntry` [#3]
+* Entries are index with `std::ops::Range` instead of an `index` + `size` pair [#4]
