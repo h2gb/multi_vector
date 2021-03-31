@@ -1,5 +1,7 @@
 # multi_vector
 
+**NOTE: This is deprecated and the functionality is rolled right into libh2gb!**
+
 [![Crate](https://img.shields.io/crates/v/multi_vector.svg)](https://crates.io/crates/multi_vector)
 
 An object that holds multiple `BumpyVector`s, and can manage linked entries
